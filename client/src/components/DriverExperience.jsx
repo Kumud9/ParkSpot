@@ -27,6 +27,8 @@ import {
   Loader2,
   CheckCircle
 } from 'lucide-react';
+import { Logo } from './shared/Logo';
+import { MapLoader, PaymentLoader, ActionLoader } from './shared/Loading';
 
 export function DriverExperience({
   facilities = [],
@@ -503,7 +505,7 @@ export function DriverExperience({
         {/* Pass Top Banner */}
         <div className="pass-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <div className="brand-badge">P</div>
+            <Logo variant="mark" size={32} theme="dark" />
             <div>
               <div style={{ fontSize: '0.9375rem', fontWeight: 700, letterSpacing: '0.04em' }}>PARKSPOT</div>
               <div style={{ fontSize: '0.6875rem', color: 'rgba(244, 242, 231, 0.65)', letterSpacing: '0.08em' }}>DIGITAL PARKING PASS</div>
@@ -834,10 +836,7 @@ export function DriverExperience({
           {/* Main Map Visualization Area */}
           <div>
             {isFacilityLoading ? (
-              <div className="card" style={{ textAlign: 'center', padding: '4rem 1rem' }}>
-                <Loader2 size={32} className="spin" style={{ margin: '0 auto 1rem', color: 'var(--ps-primary-dark)' }} />
-                <p className="metadata">Loading interactive parking bay layout...</p>
-              </div>
+              <MapLoader facilityName={selectedFacility.name} />
             ) : (
               <ParkingMap
                 floors={facilityFloors}
@@ -1166,6 +1165,14 @@ export function DriverExperience({
   // SCREEN 8: PAYMENT SCREEN
   // =========================================================================
   if (activeView === 'payment' && selectedFacility && selectedSpot) {
+    if (paymentState === 'PROCESSING') {
+      return (
+        <div className="container" style={{ maxWidth: '540px', padding: '2rem 1rem' }}>
+          <PaymentLoader amount={calculatedCost} message="Connecting to secure banking gateway..." />
+        </div>
+      );
+    }
+
     return (
       <div className="container" style={{ maxWidth: '540px' }}>
         {renderHoldExpiredModal()}
@@ -1275,9 +1282,7 @@ export function DriverExperience({
             disabled={paymentState === 'PROCESSING' || isHoldExpired}
           >
             {paymentState === 'PROCESSING' ? (
-              <>
-                <Loader2 size={18} className="spin" /> Verifying Payment with Gateway...
-              </>
+              <ActionLoader text="Verifying Payment with Gateway..." />
             ) : (
               `Pay ₹${calculatedCost} & Confirm Spot`
             )}
@@ -1510,7 +1515,7 @@ export function DriverExperience({
                   onClick={handleConfirmCancel}
                   disabled={cancelLoading}
                 >
-                  {cancelLoading ? <Loader2 size={16} className="spin" /> : 'Yes, Cancel'}
+                  {cancelLoading ? <ActionLoader text="Cancelling..." /> : 'Yes, Cancel'}
                 </button>
               </div>
             </div>

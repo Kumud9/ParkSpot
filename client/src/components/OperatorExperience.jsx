@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   ChevronRight
 } from 'lucide-react';
+import { Logo } from './shared/Logo';
 
 export function OperatorExperience({
   facilities,
@@ -127,8 +128,8 @@ export function OperatorExperience({
         flexWrap: 'wrap',
         gap: '0.75rem'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Building2 size={20} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <Logo variant="mark" size={24} />
           <strong style={{ fontSize: '1rem' }}>B2B Operator Portal</strong>
           <span className="metadata">· {selectedFacility.name}</span>
         </div>

@@ -1,0 +1,57 @@
+/* ParkSpot Official Logo Styles */
+.parkspot-logo-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  line-height: 1;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  user-select: none;
+}
+
+.parkspot-logo-container.clickable {
+  cursor: pointer;
+}
+
+.parkspot-logo-container.clickable:hover {
+  opacity: 0.92;
+}
+
+.parkspot-logo-img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  /* Preserve original colors and proportions exactly */
+}
+
+/* Light backdrop badge for dark UI surfaces (e.g. app header #25221B) */
+/* Ensures the dark elements of the logo have crisp, high-contrast visibility without altering the logo itself */
+.parkspot-logo-container.on-dark {
+  background-color: #FFFFFF;
+  border-radius: var(--ps-radius-sm, 6px);
+  padding: 4px 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.parkspot-logo-container.on-dark.variant-mark {
+  padding: 3px 5px;
+  border-radius: var(--ps-radius-sm, 4px);
+}
+
+/* Size Variants */
+.parkspot-logo-container.size-xs .parkspot-logo-img {
+  height: 22px;
+}
+.parkspot-logo-container.size-sm .parkspot-logo-img {
+  height: 32px;
+}
+.parkspot-logo-container.size-md .parkspot-logo-img {
+  height: 48px;
+}
+.parkspot-logo-container.size-lg .parkspot-logo-img {
+  height: 72px;
+}
+.parkspot-logo-container.size-xl .parkspot-logo-img {
+  height: 96px;
+}

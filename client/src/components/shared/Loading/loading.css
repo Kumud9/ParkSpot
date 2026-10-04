@@ -1,0 +1,227 @@
+/* ParkSpot Brand Loading System Styles */
+
+/* -------------------------------------------------------------------------
+   ANIMATIONS
+   Subtle, professional breathing pulse (~1.2s).
+   No excessive spins, glowing, or flashy effects. Logo stays recognizable.
+------------------------------------------------------------------------- */
+@keyframes parkspotBreathing {
+  0% {
+    transform: scale(0.97);
+    opacity: 0.88;
+  }
+  50% {
+    transform: scale(1.015);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.97);
+    opacity: 0.88;
+  }
+}
+
+@keyframes parkspotProgress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes parkspotDotPulse {
+  0%, 80%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+/* Reduced Motion Override for Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .parkspot-loading-logo {
+    animation: none !important;
+  }
+  .parkspot-progress-bar-inner {
+    animation: none !important;
+    width: 65% !important;
+    transform: none !important;
+  }
+  .parkspot-loading-dot {
+    animation: none !important;
+    opacity: 0.8 !important;
+  }
+}
+
+/* -------------------------------------------------------------------------
+   BASE LOADING LOGO CONTAINER
+------------------------------------------------------------------------- */
+.parkspot-loading-logo {
+  animation: parkspotBreathing 1.4s ease-in-out infinite;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform, opacity;
+}
+
+/* Minimalist Progress Track */
+.parkspot-progress-track {
+  width: 140px;
+  height: 3px;
+  background-color: rgba(37, 34, 27, 0.1);
+  border-radius: 9999px;
+  overflow: hidden;
+  position: relative;
+  margin-top: 1rem;
+}
+
+.parkspot-progress-bar-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+  background-color: var(--ps-accent-dark, #B2A240);
+  border-radius: 9999px;
+  animation: parkspotProgress 1.4s ease-in-out infinite;
+}
+
+.parkspot-loading-text {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ps-secondary-dark, #707371);
+  margin-top: 0.75rem;
+  letter-spacing: -0.01em;
+}
+
+/* -------------------------------------------------------------------------
+   1. FULL SCREEN LOADER
+   Covers entire viewport with Primary Light background (#F4F2E7)
+------------------------------------------------------------------------- */
+.ps-loader-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background-color: var(--ps-primary-light, #F4F2E7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+/* -------------------------------------------------------------------------
+   2. PAGE LOADER
+   Fills the content container during page data fetch
+------------------------------------------------------------------------- */
+.ps-loader-page {
+  min-height: 440px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+  text-align: center;
+  background-color: transparent;
+}
+
+/* -------------------------------------------------------------------------
+   3. COMPONENT LOADER
+   Used within cards, modals, or subsections
+------------------------------------------------------------------------- */
+.ps-loader-component {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2.25rem 1rem;
+  width: 100%;
+  text-align: center;
+}
+
+/* -------------------------------------------------------------------------
+   4. ACTION LOADER
+   Used inside buttons without jarring layout shift
+------------------------------------------------------------------------- */
+.ps-loader-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  line-height: 1;
+}
+
+.ps-loader-action-mark {
+  height: 18px;
+  width: auto;
+  animation: parkspotBreathing 1s ease-in-out infinite;
+}
+
+/* -------------------------------------------------------------------------
+   5. MAP LOADER
+   Specialized loader for top-down parking bay structure
+------------------------------------------------------------------------- */
+.ps-loader-map {
+  background-color: var(--ps-asphalt-ground, #1F1D19);
+  border: 2px solid #343027;
+  border-radius: var(--ps-radius-md, 8px);
+  min-height: 480px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  color: var(--ps-primary-light, #F4F2E7);
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+.ps-loader-map .parkspot-progress-track {
+  background-color: rgba(244, 242, 231, 0.15);
+}
+
+.ps-loader-map .parkspot-progress-bar-inner {
+  background-color: var(--ps-accent-light, #F3F456);
+}
+
+.ps-loader-map .parkspot-loading-text {
+  color: rgba(244, 242, 231, 0.75);
+}
+
+/* -------------------------------------------------------------------------
+   6. PAYMENT LOADER
+   High-trust payment authorization overlay
+------------------------------------------------------------------------- */
+.ps-loader-payment {
+  background-color: #FFFFFF;
+  border: 2px solid var(--ps-primary-dark, #25221B);
+  border-radius: var(--ps-radius-md, 8px);
+  padding: 2.5rem 1.75rem;
+  text-align: center;
+  box-shadow: var(--ps-shadow-card);
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ps-loader-payment-security {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ps-state-available, #2E7D32);
+  background-color: var(--ps-state-available-bg, rgba(46, 125, 50, 0.12));
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  margin-bottom: 1.25rem;
+}

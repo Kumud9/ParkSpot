@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { DriverExperience } from './components/DriverExperience';
 import { OperatorExperience } from './components/OperatorExperience';
+import { Logo } from './components/shared/Logo';
+import { FullScreenLoader } from './components/shared/Loading';
+import { Footer } from './components/shared/Footer/Footer';
+import { AuthModal } from './components/shared/AuthModal/AuthModal';
 import {
   INITIAL_FACILITIES,
   INITIAL_BOOKINGS,
@@ -21,6 +25,8 @@ function App() {
   // Backend Connectivity & Auth State
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [activeUser, setActiveUser] = useState(null);
+  const [isAppInitializing, setIsAppInitializing] = useState(true);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Core application state initialized with robust mock data
   const [facilities, setFacilities] = useState(() => {
@@ -144,6 +150,10 @@ function App() {
         }
       } catch (err) {
         if (isMounted) setIsLiveConnected(false);
+      } finally {
+        if (isMounted) {
+          setTimeout(() => setIsAppInitializing(false), 450);
+        }
       }
     }
 
@@ -286,21 +296,30 @@ function App() {
     }
   }, [isLiveConnected]);
 
+  // Show branded FullScreenLoader during initial load
+  if (isAppInitializing) {
+    return (
+      <FullScreenLoader
+        message="Initializing ParkSpot Smart Infrastructure..."
+        subtext="Connecting to live parking telemetry network"
+      />
+    );
+  }
+
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       {/* Top Application Header */}
       <header className="app-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
           <div
             className="brand"
-            style={{ cursor: 'pointer' }}
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
             onClick={() => {
               setCurrentMode('driver');
               setDriverView('home');
             }}
           >
-            <div className="brand-badge">P</div>
-            <span>ParkSpot</span>
+            <Logo variant="full" size="sm" theme="dark" />
           </div>
 
           {currentMode === 'driver' && (
@@ -352,6 +371,15 @@ function App() {
             <span>{isLiveConnected ? 'Live API' : 'Demo Mode'}</span>
           </div>
 
+          {/* Account / Sign In Trigger */}
+          <button
+            className="btn btn-secondary btn-sm"
+            style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}
+            onClick={() => setIsAuthModalOpen(true)}
+          >
+            {activeUser ? activeUser.name?.split(' ')[0] : 'Sign In'}
+          </button>
+
           <div className="mode-pill">
             <button
               className={`mode-btn ${currentMode === 'driver' ? 'active' : ''}`}
@@ -393,6 +421,26 @@ function App() {
           />
         )}
       </main>
+
+      {/* Official Brand Footer */}
+      <Footer
+        onNavigate={(mode, view) => {
+          setCurrentMode(mode);
+          if (view) setDriverView(view);
+        }}
+      />
+
+      {/* Login & Signup Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        defaultRole={currentMode}
+        onAuthSuccess={(user, role) => {
+          setActiveUser(user);
+          if (role === 'operator') setCurrentMode('operator');
+          else setCurrentMode('driver');
+        }}
+      />
     </div>
   );
 }
