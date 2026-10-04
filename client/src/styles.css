@@ -1,0 +1,795 @@
+:root {
+  /* ParkSpot Core 6-Color Brand Palette */
+  --ps-primary-light: #F4F2E7;
+  --ps-primary-dark: #25221B;
+  --ps-secondary-light: #E6DFD1;
+  --ps-secondary-dark: #707371;
+  --ps-accent-light: #F3F456;
+  --ps-accent-dark: #B2A240;
+
+  /* Semantic Parking State Colors */
+  --ps-state-available: #2E7D32;
+  --ps-state-available-bg: rgba(46, 125, 50, 0.12);
+  --ps-state-occupied: #C62828;
+  --ps-state-occupied-bg: rgba(198, 40, 40, 0.12);
+  --ps-state-reserved: #D97706;
+  --ps-state-reserved-bg: rgba(217, 119, 6, 0.12);
+  --ps-state-maintenance: #757575;
+  --ps-state-maintenance-bg: rgba(117, 117, 117, 0.12);
+  --ps-state-blocked: #374151;
+  --ps-state-blocked-bg: rgba(55, 65, 81, 0.15);
+
+  /* Realistic Parking Infrastructure Surfaces */
+  --ps-asphalt-ground: #1F1D19;
+  --ps-asphalt-lane: #282520;
+  --ps-bay-surface: #24221D;
+  --ps-bay-line: rgba(244, 242, 231, 0.75);
+  --ps-bay-line-yellow: rgba(243, 244, 86, 0.85);
+
+  /* Typography Scale */
+  --ps-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --ps-font-mono: 'JetBrains Mono', monospace;
+
+  /* Geometry & Shadows */
+  --ps-radius-sm: 4px;
+  --ps-radius-md: 8px;
+  --ps-radius-lg: 12px;
+  --ps-shadow-subtle: 0 1px 3px rgba(37, 34, 27, 0.08);
+  --ps-shadow-card: 0 4px 12px rgba(37, 34, 27, 0.06);
+  --ps-shadow-float: 0 12px 28px rgba(37, 34, 27, 0.12);
+  --ps-transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--ps-font-sans);
+  background-color: var(--ps-primary-light);
+  color: var(--ps-primary-dark);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Typography Hierarchy */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  color: var(--ps-primary-dark);
+  line-height: 1.25;
+}
+
+.display-title {
+  font-size: 2.25rem;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.page-title {
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+}
+
+.section-title {
+  font-size: 1.25rem;
+  letter-spacing: -0.01em;
+}
+
+.metadata {
+  font-size: 0.8125rem;
+  color: var(--ps-secondary-dark);
+}
+
+.eyebrow {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ps-secondary-dark);
+  margin-bottom: 0.35rem;
+}
+
+/* App Header & Navigation */
+header.app-header {
+  background-color: var(--ps-primary-dark);
+  color: var(--ps-primary-light);
+  height: 64px;
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--ps-primary-light);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.brand-badge {
+  background-color: var(--ps-accent-light);
+  color: var(--ps-primary-dark);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ps-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nav-link {
+  color: rgba(244, 242, 231, 0.75);
+  text-decoration: none;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: var(--ps-radius-sm);
+  transition: var(--ps-transition);
+}
+
+.nav-link:hover, .nav-link.active {
+  color: var(--ps-primary-light);
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.nav-link.active {
+  color: var(--ps-accent-light);
+  font-weight: 600;
+}
+
+.mode-pill {
+  display: flex;
+  background-color: rgba(0, 0, 0, 0.25);
+  padding: 2px;
+  border-radius: var(--ps-radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  margin-left: 1rem;
+}
+
+.mode-btn {
+  background: transparent;
+  border: none;
+  color: rgba(244, 242, 231, 0.65);
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: var(--ps-transition);
+}
+
+.mode-btn.active {
+  background-color: var(--ps-accent-light);
+  color: var(--ps-primary-dark);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.15rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: var(--ps-radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: var(--ps-transition);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background-color: var(--ps-primary-dark);
+  color: var(--ps-primary-light);
+}
+
+.btn-primary:hover {
+  background-color: #3b362b;
+}
+
+.btn-accent {
+  background-color: var(--ps-accent-light);
+  color: var(--ps-primary-dark);
+}
+
+.btn-accent:hover {
+  background-color: #e5e648;
+}
+
+.btn-secondary {
+  background-color: var(--ps-secondary-light);
+  color: var(--ps-primary-dark);
+  border-color: rgba(112, 115, 113, 0.25);
+}
+
+.btn-secondary:hover {
+  background-color: #ddd4c4;
+}
+
+.btn-outline {
+  background: transparent;
+  border-color: var(--ps-secondary-dark);
+  color: var(--ps-primary-dark);
+}
+
+.btn-outline:hover {
+  background-color: rgba(37, 34, 27, 0.05);
+}
+
+.btn-sm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.75rem;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Badges and Tags */
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: var(--ps-radius-sm);
+  letter-spacing: 0.02em;
+}
+
+.status-tag.available {
+  background-color: var(--ps-state-available-bg);
+  color: var(--ps-state-available);
+  border: 1px solid rgba(46, 125, 50, 0.3);
+}
+
+.status-tag.occupied {
+  background-color: var(--ps-state-occupied-bg);
+  color: var(--ps-state-occupied);
+  border: 1px solid rgba(198, 40, 40, 0.3);
+}
+
+.status-tag.reserved {
+  background-color: var(--ps-state-reserved-bg);
+  color: var(--ps-state-reserved);
+  border: 1px solid rgba(217, 119, 6, 0.3);
+}
+
+.status-tag.maintenance {
+  background-color: var(--ps-state-maintenance-bg);
+  color: var(--ps-state-maintenance);
+  border: 1px solid rgba(117, 117, 117, 0.3);
+}
+
+.status-tag.blocked {
+  background-color: var(--ps-state-blocked-bg);
+  color: var(--ps-state-blocked);
+  border: 1px solid rgba(55, 65, 81, 0.3);
+}
+
+.status-tag.selected {
+  background-color: var(--ps-accent-light);
+  color: var(--ps-primary-dark);
+  border: 1px solid var(--ps-accent-dark);
+}
+
+/* Cards & Surfaces */
+.card {
+  background-color: #FFFFFF;
+  border: 1px solid var(--ps-secondary-light);
+  border-radius: var(--ps-radius-md);
+  padding: 1.25rem;
+  box-shadow: var(--ps-shadow-card);
+}
+
+.card-neutral {
+  background-color: var(--ps-secondary-light);
+  border: 1px solid rgba(112, 115, 113, 0.2);
+}
+
+/* Layout Containers */
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  width: 100%;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 992px) {
+  .content-grid-split {
+    grid-template-columns: 1fr 360px;
+    align-items: start;
+  }
+}
+
+/* =======================================================
+   SIGNATURE INTERACTIVE PARKING MAP VISUALIZATION
+   ======================================================= */
+.parking-structure {
+  background-color: var(--ps-asphalt-ground);
+  border: 2px solid #343027;
+  border-radius: var(--ps-radius-md);
+  padding: 1.5rem;
+  color: var(--ps-primary-light);
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5), var(--ps-shadow-card);
+}
+
+.facility-overhead-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #38342B;
+  padding-bottom: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.floor-pill-group {
+  display: flex;
+  gap: 0.4rem;
+  background-color: #141310;
+  padding: 3px;
+  border-radius: var(--ps-radius-sm);
+  border: 1px solid #343027;
+}
+
+.floor-pill {
+  background: transparent;
+  color: rgba(244, 242, 231, 0.7);
+  border: none;
+  padding: 4px 12px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: var(--ps-transition);
+}
+
+.floor-pill.active {
+  background-color: var(--ps-secondary-light);
+  color: var(--ps-primary-dark);
+}
+
+.parking-legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: rgba(244, 242, 231, 0.75);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+/* Driving Lanes & Arrows */
+.driving-lane {
+  background-color: var(--ps-asphalt-lane);
+  border-top: 1px dashed var(--ps-bay-line);
+  border-bottom: 1px dashed var(--ps-bay-line);
+  padding: 0.85rem 1rem;
+  margin: 1rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: rgba(244, 242, 231, 0.5);
+  font-family: var(--ps-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  user-select: none;
+}
+
+.lane-arrow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ps-bay-line-yellow);
+}
+
+.lane-indicator {
+  font-weight: 700;
+  background: #141310;
+  padding: 2px 8px;
+  border-radius: 2px;
+  border: 1px solid #443F34;
+}
+
+.lane-indicator.entry {
+  color: var(--ps-accent-light);
+}
+
+.lane-indicator.exit {
+  color: #FFA726;
+}
+
+/* Parking Row Grid */
+.parking-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 0.75rem;
+}
+
+/* Parking Bay Box */
+.parking-bay {
+  background-color: var(--ps-bay-surface);
+  border-left: 2px solid var(--ps-bay-line);
+  border-right: 2px solid var(--ps-bay-line);
+  border-top: 2px solid transparent;
+  border-bottom: 4px solid #443F35; /* Tire stop / curb bumper */
+  height: 155px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.5rem 0.35rem 0.35rem 0.35rem;
+  cursor: pointer;
+  transition: var(--ps-transition);
+  outline: none;
+}
+
+.parking-bay:hover:not(:disabled) {
+  border-color: var(--ps-accent-light);
+  background-color: #2F2C24;
+}
+
+.parking-bay.selected {
+  background-color: rgba(243, 244, 86, 0.12);
+  border-left: 3px solid var(--ps-accent-light) !important;
+  border-right: 3px solid var(--ps-accent-light) !important;
+  border-top: 2px solid var(--ps-accent-light) !important;
+  box-shadow: 0 0 0 2px var(--ps-primary-dark), 0 0 12px rgba(243, 244, 86, 0.35);
+}
+
+.parking-bay.occupied {
+  cursor: default;
+}
+
+.parking-bay.blocked, .parking-bay.maintenance {
+  background-color: #171613;
+  opacity: 0.7;
+  cursor: not-allowed;
+  border-left-style: dashed;
+  border-right-style: dashed;
+}
+
+.bay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.bay-id {
+  font-family: var(--ps-font-mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: rgba(244, 242, 231, 0.85);
+  background-color: #141310;
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+.bay-rate {
+  font-size: 0.6875rem;
+  color: var(--ps-secondary-dark);
+}
+
+.bay-car-slot {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  position: relative;
+}
+
+.bay-empty-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  color: rgba(244, 242, 231, 0.3);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.parking-bay:hover .bay-empty-indicator {
+  color: var(--ps-accent-light);
+}
+
+.bay-footer {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.bay-bumper {
+  width: 80%;
+  height: 4px;
+  background-color: #4A463B;
+  border-radius: 1px;
+}
+
+/* Modals & Drawers */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(37, 34, 27, 0.6);
+  z-index: 200;
+  display: flex;
+  justify-content: flex-end;
+  animation: fadeIn 0.2s ease;
+}
+
+.drawer-panel {
+  background-color: var(--ps-primary-light);
+  width: 100%;
+  max-width: 440px;
+  height: 100%;
+  overflow-y: auto;
+  box-shadow: var(--ps-shadow-float);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(37, 34, 27, 0.65);
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-content {
+  background-color: #FFFFFF;
+  border-radius: var(--ps-radius-md);
+  max-width: 520px;
+  width: 100%;
+  padding: 1.5rem;
+  box-shadow: var(--ps-shadow-float);
+  border: 1px solid var(--ps-secondary-light);
+}
+
+/* Form Controls */
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+  color: var(--ps-primary-dark);
+}
+
+.form-input, .form-select {
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid rgba(112, 115, 113, 0.35);
+  border-radius: var(--ps-radius-sm);
+  font-family: var(--ps-font-sans);
+  font-size: 0.875rem;
+  background-color: #FFFFFF;
+  color: var(--ps-primary-dark);
+  transition: var(--ps-transition);
+}
+
+.form-input:focus, .form-select:focus {
+  outline: none;
+  border-color: var(--ps-primary-dark);
+  box-shadow: 0 0 0 2px rgba(37, 34, 27, 0.12);
+}
+
+/* Table styling for Operator Views */
+.data-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--ps-secondary-light);
+  border-radius: var(--ps-radius-md);
+  background-color: #FFFFFF;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.875rem;
+}
+
+.data-table th {
+  background-color: var(--ps-secondary-light);
+  color: var(--ps-primary-dark);
+  font-weight: 600;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(112, 115, 113, 0.2);
+}
+
+.data-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(230, 223, 209, 0.6);
+  color: var(--ps-primary-dark);
+}
+
+.data-table tr:hover {
+  background-color: rgba(244, 242, 231, 0.5);
+}
+
+/* Hold Countdown Pill */
+.hold-timer-bar {
+  background-color: var(--ps-accent-light);
+  color: var(--ps-primary-dark);
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: var(--ps-radius-sm);
+  margin-bottom: 1rem;
+  border: 1px solid var(--ps-accent-dark);
+}
+
+.hold-timer-bar.urgent {
+  background-color: #FDE8E8;
+  color: #9B1C1C;
+  border-color: #F87171;
+}
+
+/* Digital Parking Pass Card */
+.digital-pass-card {
+  background-color: #FFFFFF;
+  border: 2px solid var(--ps-primary-dark);
+  border-radius: var(--ps-radius-md);
+  overflow: hidden;
+  box-shadow: var(--ps-shadow-card);
+  text-align: left;
+}
+
+.pass-header {
+  background-color: var(--ps-primary-dark);
+  color: var(--ps-primary-light);
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pass-body {
+  padding: 1.25rem;
+}
+
+.pass-divider {
+  border: none;
+  border-top: 2px dashed rgba(112, 115, 113, 0.3);
+  margin: 1rem 0;
+  position: relative;
+}
+
+.pass-credential-strip {
+  background-color: var(--ps-primary-light);
+  border: 1px solid var(--ps-secondary-light);
+  border-radius: var(--ps-radius-sm);
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+}
+
+/* Accessibility Focus States */
+.parking-bay:focus-visible,
+.btn:focus-visible,
+.form-input:focus-visible,
+.form-select:focus-visible,
+.floor-pill:focus-visible,
+.nav-link:focus-visible,
+.mode-btn:focus-visible {
+  outline: 2px solid var(--ps-accent-dark);
+  outline-offset: 2px;
+}
+
+/* Responsive Media Queries for Driver MVP */
+@media (max-width: 768px) {
+  .container {
+    padding: 1rem;
+  }
+
+  .display-title {
+    font-size: 1.75rem;
+  }
+
+  .page-title {
+    font-size: 1.35rem;
+  }
+
+  .facility-overhead-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .parking-legend {
+    gap: 0.6rem;
+    font-size: 0.6875rem;
+  }
+
+  .parking-row-grid {
+    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+    gap: 0.5rem;
+  }
+
+  .parking-bay {
+    height: 140px;
+    padding: 0.35rem 0.25rem;
+  }
+
+  .bay-id {
+    font-size: 0.75rem;
+  }
+
+  .driving-lane {
+    font-size: 0.6875rem;
+    padding: 0.6rem 0.75rem;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
