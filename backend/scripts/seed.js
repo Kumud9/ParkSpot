@@ -1,9 +1,10 @@
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
-const { connectDatabase } = require('./src/db');
+const { connectDatabase } = require('../src/db');
 const {
   User,
   Organization,
@@ -15,7 +16,7 @@ const {
   Booking,
   OccupancyEvent,
   AuditLog
-} = require('./src/models');
+} = require('../src/models');
 
 async function seed() {
   await connectDatabase();

@@ -1,11 +1,34 @@
-node_modules
+# Node dependencies & build
+node_modules/
+dist/
+coverage/
+
+# Environment files (NEVER commit secrets to GitHub)
 .env
-.env.local
-dist
-coverage
+.env.*
+*.env
+**/.env
+**/.env.*
+!.env.example
+
+# Python & testing caches
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
 .pytest_cache/
-ml/data/*.csv
-ml/data/*.json
-!ml/data/.gitkeep
+.venv/
+venv/
+
+# ML generated data & artifacts
+ml/data/
+ml/artifacts/
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+.idea/
+.vscode/

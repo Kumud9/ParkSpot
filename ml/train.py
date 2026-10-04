@@ -1,5 +1,5 @@
 """
-Model Training Pipeline
+Model Training & Evaluation Pipeline
 
 Trains a GradientBoostingRegressor within a scikit-learn Pipeline
 (incorporating cyclical time encoding, median imputation, and feature scaling).
@@ -10,10 +10,13 @@ Saves model artifact to ml/artifacts/demand_model.joblib and metadata to ml/arti
 import os
 import json
 from datetime import datetime, timezone
+from typing import Dict, Any
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from config import (
     ARTIFACTS_DIR,
@@ -23,9 +26,85 @@ from config import (
     GRADIENT_BOOSTING_PARAMS,
     MODEL_VERSION
 )
-from dataset import load_dataset, split_time_series, prepare_xy_split
-from features import create_feature_pipeline
-from evaluate import evaluate_baseline_predictions, compare_models
+from features import (
+    load_dataset,
+    split_time_series,
+    prepare_xy_split,
+    create_feature_pipeline
+)
+
+def evaluate_baseline_predictions(df: pd.DataFrame) -> np.ndarray:
+    """
+    Computes predictions using the Phase 3.1 deterministic baseline:
+    Moving average adjusted by rolling 7-day momentum and peak indicator.
+    """
+    preds = []
+    for _, row in df.iterrows():
+        base = row["historicalBookingCount"]
+        rolling = row["rolling7DayDemand"]
+        is_peak = row["peakHourIndicator"]
+
+        pred = (0.7 * base + 0.3 * row["previousHourDemand"]) * (1.1 if is_peak else 0.95)
+        pred = np.clip(pred, 0, row["facilityCapacity"])
+        preds.append(round(float(pred)))
+
+    return np.array(preds)
+
+def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    """
+    Calculates numerical regression metrics: MAE, RMSE, R², MAPE.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    mae = float(mean_absolute_error(y_true, y_pred))
+    rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
+    r2 = float(r2_score(y_true, y_pred))
+
+    non_zero_mask = y_true > 0
+    if np.any(non_zero_mask):
+        mape = float(np.mean(np.abs((y_true[non_zero_mask] - y_pred[non_zero_mask]) / y_true[non_zero_mask])) * 100.0)
+    else:
+        mape = 0.0
+
+    return {
+        "mae": round(mae, 4),
+        "rmse": round(rmse, 4),
+        "r2": round(r2, 4),
+        "mape": round(mape, 2)
+    }
+
+def compare_models(y_true: np.ndarray, baseline_preds: np.ndarray, ml_preds: np.ndarray) -> Dict[str, Any]:
+    """
+    Generates side-by-side comparison between deterministic baseline and ML model.
+    """
+    base_metrics = calculate_metrics(y_true, baseline_preds)
+    ml_metrics = calculate_metrics(y_true, ml_preds)
+
+    mae_diff = base_metrics["mae"] - ml_metrics["mae"]
+    rmse_diff = base_metrics["rmse"] - ml_metrics["rmse"]
+    r2_diff = ml_metrics["r2"] - base_metrics["r2"]
+
+    ml_outperformed = (mae_diff > 0 and rmse_diff > 0) or (r2_diff > 0.05)
+
+    comparison_table = (
+        f"\n{'Model':<25} | {'MAE':<8} | {'RMSE':<8} | {'R²':<8} | {'MAPE (%)':<8}\n"
+        f"{'-'*65}\n"
+        f"{'Deterministic Baseline':<25} | {base_metrics['mae']:<8.4f} | {base_metrics['rmse']:<8.4f} | {base_metrics['r2']:<8.4f} | {base_metrics['mape']:<8.2f}\n"
+        f"{'Gradient Boosting ML':<25} | {ml_metrics['mae']:<8.4f} | {ml_metrics['rmse']:<8.4f} | {ml_metrics['r2']:<8.4f} | {ml_metrics['mape']:<8.2f}\n"
+    )
+
+    return {
+        "comparison_table": comparison_table,
+        "baseline": base_metrics,
+        "ml": ml_metrics,
+        "ml_outperformed": ml_outperformed,
+        "improvements": {
+            "mae_reduction": round(mae_diff, 4),
+            "rmse_reduction": round(rmse_diff, 4),
+            "r2_gain": round(r2_diff, 4)
+        }
+    }
 
 def train_demand_model(data_path=None):
     print("=" * 60)
@@ -44,9 +123,6 @@ def train_demand_model(data_path=None):
     train_end = str(train_df["timestamp"].max()) if "timestamp" in train_df.columns else "N/A"
     test_start = str(test_df["timestamp"].min()) if "timestamp" in test_df.columns else "N/A"
     test_end = str(test_df["timestamp"].max()) if "timestamp" in test_df.columns else "N/A"
-
-    print(f"Training window:   {train_start} -> {train_end}")
-    print(f"Test window:       {test_start} -> {test_end}")
 
     # 3. Prepare X and y
     X_train, y_train = prepare_xy_split(train_df)
@@ -75,11 +151,6 @@ def train_demand_model(data_path=None):
     # 6. Evaluation & Comparison
     eval_results = compare_models(y_test.values, test_baseline_preds, test_ml_preds)
     print(eval_results["comparison_table"])
-
-    if eval_results["ml_outperformed"]:
-        print(">> Evaluation Verdict: ML model OUTPERFORMED baseline.")
-    else:
-        print(">> Evaluation Verdict: Baseline performs comparably or better. Keeping transparent lineage.")
 
     # 7. Persist Artifacts
     os.makedirs(ARTIFACTS_DIR, exist_ok=True)

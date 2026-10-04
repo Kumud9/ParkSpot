@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dataset import load_dataset, split_time_series, prepare_xy_split
+from features import load_dataset, split_time_series, prepare_xy_split
 from predict import predict_demand, calculate_estimated_confidence
-from evaluate import calculate_metrics
+from train import calculate_metrics
 
 def test_chronological_split_no_leakage():
     df = load_dataset()

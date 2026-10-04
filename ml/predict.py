@@ -21,8 +21,13 @@ def get_model():
     global _model_cache, _metadata_cache
     if _model_cache is None:
         if not Path(MODEL_PATH).exists():
-            raise FileNotFoundError(f"Model artifact not found at: {MODEL_PATH}. Run training first.")
-        _model_cache = joblib.load(MODEL_PATH)
+            try:
+                from train import train_demand_model
+                _model_cache, _metadata_cache = train_demand_model()
+            except Exception:
+                raise FileNotFoundError(f"Model artifact not found at: {MODEL_PATH}. Run training first.")
+        else:
+            _model_cache = joblib.load(MODEL_PATH)
 
     if _metadata_cache is None:
         if Path(METADATA_PATH).exists():
