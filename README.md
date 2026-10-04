@@ -70,28 +70,48 @@ npm run build
 
 ---
 
-## API Surface
+## Repository Structure
 
-### 1. Version 1 B2B Endpoints (`/api/v1`)
+```text
+ParkSpot/
+│
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   ├── package.json
+│   ├── vite.config.js
+│   └── README.md
+│
+├── backend/
+│   ├── src/
+│   ├── tests/
+│   ├── scripts/
+│   ├── package.json
+│   └── README.md
+│
+├── ml/
+│   ├── config.py
+│   ├── features.py
+│   ├── train.py
+│   ├── predict.py
+│   ├── api.py
+│   ├── requirements.txt
+│   └── tests/
+│
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── API.md
+│   ├── PHASE_4_1_DRIVER_MVP.md
+│   └── PHASE_4_2_OPERATOR_MVP.md
+│
+├── .env.example
+├── .gitignore
+└── README.md
+```
 
-| Domain | Methods & Paths | Role / Auth |
-| :--- | :--- | :--- |
-| **Auth** | `POST /api/v1/auth/register`<br/>`POST /api/v1/auth/login`<br/>`GET /api/v1/auth/me` | Public (Strict rate limits)<br/>Public<br/>Authenticated |
-| **Facilities** | `GET /api/v1/facilities/search`<br/>`GET /api/v1/facilities/:id/public`<br/>`GET /api/v1/facilities`<br/>`POST /api/v1/facilities`<br/>`PATCH /api/v1/facilities/:id` | Public<br/>Public<br/>OWNER, ADMIN, MANAGER, OPERATOR<br/>OWNER, ADMIN<br/>OWNER, ADMIN |
-| **Floors** | `GET /api/v1/facilities/:facilityId/floors`<br/>`POST /api/v1/facilities/:facilityId/floors`<br/>`PATCH /api/v1/facilities/:facilityId/floors/:id` | OWNER, ADMIN, MANAGER, OPERATOR<br/>OWNER, ADMIN<br/>OWNER, ADMIN |
-| **Spots** | `GET /api/v1/facilities/:facilityId/spots`<br/>`POST /api/v1/facilities/:facilityId/spots`<br/>`PATCH /api/v1/facilities/:facilityId/spots/:id`<br/>`PATCH /api/v1/facilities/:facilityId/spots/:id/status` | OWNER, ADMIN, MANAGER, OPERATOR<br/>OWNER, ADMIN<br/>OWNER, ADMIN, OPERATOR<br/>OWNER, ADMIN, OPERATOR |
-| **Pricing** | `GET /api/v1/facilities/:facilityId/pricing`<br/>`POST /api/v1/facilities/:facilityId/pricing`<br/>`PATCH /api/v1/facilities/:facilityId/pricing/:id` | OWNER, ADMIN, MANAGER<br/>OWNER, ADMIN<br/>OWNER, ADMIN |
-| **Bookings** | `GET /api/v1/bookings`<br/>`POST /api/v1/bookings`<br/>`PATCH /api/v1/bookings/:id/cancel` | Authenticated USER<br/>Authenticated USER<br/>Authenticated USER |
-| **Vehicles** | `GET /api/v1/vehicles`<br/>`POST /api/v1/vehicles` | Authenticated USER<br/>Authenticated USER |
-| **Admin** | `GET /api/v1/admin/overview`<br/>`GET /api/v1/admin/users`<br/>`GET /api/v1/admin/reports` | OWNER, ADMIN, MANAGER |
+For complete documentation:
+- System Architecture & ADRs: [docs/ARCHITECTURE.md](file:///d:/ParkSpot/docs/ARCHITECTURE.md)
+- REST API Specification: [docs/API.md](file:///d:/ParkSpot/docs/API.md)
+- Phase 4.1 Driver MVP: [docs/PHASE_4_1_DRIVER_MVP.md](file:///d:/ParkSpot/docs/PHASE_4_1_DRIVER_MVP.md)
+- Phase 4.2 Operator MVP: [docs/PHASE_4_2_OPERATOR_MVP.md](file:///d:/ParkSpot/docs/PHASE_4_2_OPERATOR_MVP.md)
 
-### 2. Legacy / Consumer Compatibility Endpoints (`/api`)
-
-- `GET /api/health`: Service liveness check
-- `GET /api/health/ready`: Database connectivity readiness check
-- `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`
-- `GET /api/lots`, `GET /api/lots/:id`
-- `GET /api/bookings`, `POST /api/bookings`, `PATCH /api/bookings/:id/cancel`
-- `GET /api/admin/overview`, `GET /api/admin/users`, `GET /api/admin/lots`, `GET /api/admin/reports`
-
-For in-depth architectural details and ADRs, consult [server/docs/ARCHITECTURE.md](file:///d:/ParkSpot/server/docs/ARCHITECTURE.md).

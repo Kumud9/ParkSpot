@@ -417,7 +417,10 @@ function App() {
             facilities={facilities}
             events={events}
             auditLogs={auditLogs}
+            bookings={bookings}
             onUpdateSpotStatus={handleUpdateSpotStatus}
+            isLiveConnected={isLiveConnected}
+            activeUser={activeUser}
           />
         )}
       </main>

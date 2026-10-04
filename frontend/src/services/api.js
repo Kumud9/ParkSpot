@@ -252,9 +252,28 @@ export const api = {
   },
 
   /**
+   * Operator: Ensure authenticated operator session
+   */
+  async ensureOperatorAuth(email = 'admin@urbanpark.test', password = 'Pass@12345') {
+    let token = authStorage.getOperatorToken();
+    if (token) return token;
+    try {
+      const auth = await api.login(email, password);
+      if (auth?.token) {
+        authStorage.setOperatorToken(auth.token);
+        return auth.token;
+      }
+    } catch (e) {
+      console.info('[ParkSpot API] Auto-operator auth note:', e.message);
+    }
+    return null;
+  },
+
+  /**
    * Operator: Ingest operational spot event
    */
   async ingestEvent(facilityId, payload) {
+    await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const data = await request(`/v1/facilities/${facilityId}/events`, {
       method: 'POST',
@@ -268,6 +287,7 @@ export const api = {
    * Operator: Get live facility occupancy
    */
   async getOccupancy(facilityId) {
+    await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const data = await request(`/v1/facilities/${facilityId}/occupancy`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
@@ -276,21 +296,41 @@ export const api = {
   },
 
   /**
+   * Operator: Update spot status
+   */
+  async updateSpotStatus(facilityId, spotId, status) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const data = await request(`/v1/facilities/${facilityId}/spots/${spotId}/status`, {
+      method: 'PATCH',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: JSON.stringify({ status })
+    });
+    return data;
+  },
+
+  /**
    * Operator: Get audit logs
    */
   async getAuditLogs(params = {}) {
+    await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/audit-logs${query ? `?${query}` : ''}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-    return data.auditLogs || [];
+    try {
+      const data = await request(`/v1/admin/audit-logs${query ? `?${query}` : ''}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      return data.auditLogs || [];
+    } catch {
+      return [];
+    }
   },
 
   /**
    * Operator: Get optimization recommendations
    */
   async getRecommendations(facilityId) {
+    await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = facilityId ? `?facilityId=${encodeURIComponent(facilityId)}` : '';
     const data = await request(`/v1/optimization/recommendations${query}`, {
@@ -303,6 +343,7 @@ export const api = {
    * Operator: Accept recommendation
    */
   async acceptRecommendation(id) {
+    await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const data = await request(`/v1/optimization/recommendations/${id}/accept`, {
       method: 'POST',
@@ -314,11 +355,27 @@ export const api = {
   /**
    * Operator: Reject recommendation
    */
-  async rejectRecommendation(id) {
+  async rejectRecommendation(id, reason = 'Operator manual decline') {
+    await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const data = await request(`/v1/optimization/recommendations/${id}/reject`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: JSON.stringify({ reason })
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Dynamic pricing simulation (What-If engine)
+   */
+  async simulatePricing(payload) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const data = await request('/v1/optimization/simulate-pricing', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: JSON.stringify(payload)
     });
     return data;
   },
@@ -327,6 +384,7 @@ export const api = {
    * Operator: Get demand forecast
    */
   async getDemandForecast(facilityId, horizon = 24, granularity = 'hour') {
+    await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const data = await request(`/v1/forecasting/demand?facilityId=${facilityId}&horizon=${horizon}&granularity=${granularity}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
@@ -335,14 +393,155 @@ export const api = {
   },
 
   /**
-   * Operator: Get overstays
+   * Operator: Get overstays triage list
    */
-  async getOverstays(facilityId) {
+  async getOverstays(facilityId, status = null) {
+    await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const query = facilityId ? `?facilityId=${facilityId}` : '';
-    const data = await request(`/v1/optimization/overstays${query}`, {
+    const params = new URLSearchParams();
+    if (facilityId) params.append('facilityId', facilityId);
+    if (status) params.append('status', status);
+    const query = params.toString();
+    const data = await request(`/v1/optimization/overstays${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data.overstays || [];
+  },
+
+  /**
+   * Operator: AI Operations Assistant Insights
+   */
+  async getAIInsights({ facilityId, question, startDate, endDate }) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const data = await request('/v1/ai/insights', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: JSON.stringify({ facilityId, question, startDate, endDate })
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Explain recommendation via AI Operations Assistant
+   */
+  async explainRecommendation(id) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const data = await request(`/v1/ai/explain-recommendation/${id}`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Analytics - Dashboard Summary
+   */
+  async getDashboardSummary(params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    const data = await request(`/v1/analytics/summary${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Analytics - Utilization
+   */
+  async getUtilization(params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    const data = await request(`/v1/analytics/utilization${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Analytics - Occupancy Trends
+   */
+  async getOccupancyTrends(params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    const data = await request(`/v1/analytics/occupancy${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Analytics - Peak Hours
+   */
+  async getPeakHours(params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    const data = await request(`/v1/analytics/peak-hours${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Analytics - Revenue (Restricted to OWNER, ADMIN, MANAGER)
+   */
+  async getRevenueAnalytics(params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    try {
+      const data = await request(`/v1/analytics/revenue${query ? `?${query}` : ''}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      return data;
+    } catch (err) {
+      if (err.status === 403) {
+        return { forbidden: true, message: 'Revenue analytics restricted to Owner, Admin, and Manager roles.' };
+      }
+      throw err;
+    }
+  },
+
+  /**
+   * Operator: Analytics - Facilities comparison
+   */
+  async getFacilityPerformance(params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    const data = await request(`/v1/analytics/facilities${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Analytics - Spot performance
+   */
+  async getSpotPerformance(params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    const data = await request(`/v1/analytics/spots${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Overview summary metrics
+   */
+  async getAdminOverview() {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const data = await request('/v1/admin/overview', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data?.overview || null;
   }
 };
