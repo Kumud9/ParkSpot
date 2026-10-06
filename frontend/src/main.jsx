@@ -1,34 +1,37 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { DriverExperience } from './components/DriverExperience';
 import { OperatorExperience } from './components/OperatorExperience';
 import { Logo } from './components/shared/Logo';
 import { FullScreenLoader } from './components/shared/Loading';
 import { Footer } from './components/shared/Footer/Footer';
-import { AuthModal } from './components/shared/AuthModal/AuthModal';
+import { LandingPage } from './pages/LandingPage';
+import { LoginPage } from './pages/LoginPage';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import {
   INITIAL_FACILITIES,
-  INITIAL_BOOKINGS,
   INITIAL_EVENTS,
   INITIAL_AUDIT_LOGS,
   generateFloorSpots
 } from './data/mockData';
-import { api, authStorage } from './services/api';
+import { api } from './services/api';
+import { ShieldAlert } from 'lucide-react';
 import './styles.css';
+import './components/landing/landing.css';
 
-function App() {
-  // Mode: 'driver' | 'operator'
-  const [currentMode, setCurrentMode] = useState('driver');
+function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
+
   const [driverView, setDriverView] = useState('home'); // home | search | facility | date-time | review | payment | confirmed | bookings
+  const [operatorTab, setOperatorTab] = useState('dashboard');
 
-  // Backend Connectivity & Auth State
+  // Backend Connectivity (internal networking flag, no user-facing badge)
   const [isLiveConnected, setIsLiveConnected] = useState(false);
-  const [activeUser, setActiveUser] = useState(null);
-  const [isAppInitializing, setIsAppInitializing] = useState(true);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  // Core application state initialized with robust mock data
+  // Facilities state initialized with geographic facilities
   const [facilities, setFacilities] = useState(() => {
     return INITIAL_FACILITIES.map((fac) => ({
       ...fac,
@@ -36,15 +39,16 @@ function App() {
     }));
   });
 
-  const [bookings, setBookings] = useState(INITIAL_BOOKINGS);
+  // User-scoped bookings: starts empty to guarantee complete isolation across user accounts
+  const [bookings, setBookings] = useState([]);
   const [events, setEvents] = useState(INITIAL_EVENTS);
   const [auditLogs, setAuditLogs] = useState(INITIAL_AUDIT_LOGS);
 
-  // Progressive API Synchronization on Mount
+  // Sync facilities with backend
   useEffect(() => {
     let isMounted = true;
 
-    async function syncWithBackend() {
+    async function syncFacilities() {
       try {
         const isHealthy = await api.checkHealth();
         if (!isMounted) return;
@@ -52,121 +56,122 @@ function App() {
 
         if (!isHealthy) return;
 
-        // Auto-authenticate default sessions for local demo & full API access
-        try {
-          const driverAuth = await api.login('user@parkspot.test', 'Pass@12345');
-          if (driverAuth?.token) {
-            authStorage.setDriverToken(driverAuth.token);
-            setActiveUser(driverAuth.user);
-          }
-        } catch (e) {
-          console.info('[ParkSpot] Driver auto-login demo skipped:', e.message);
-        }
-
-        try {
-          const operatorAuth = await api.login('admin@urbanpark.test', 'Pass@12345');
-          if (operatorAuth?.token) {
-            authStorage.setOperatorToken(operatorAuth.token);
-          }
-        } catch (e) {
-          console.info('[ParkSpot] Operator auto-login demo skipped:', e.message);
-        }
-
-        // Fetch live facilities
-        try {
-          const liveFacilities = await api.getFacilities();
-          if (isMounted && liveFacilities && liveFacilities.length > 0) {
-            // Enrich with spots from backend or generate floor spots if slots array is sparse
-            const enriched = await Promise.all(
-              liveFacilities.map(async (fac) => {
-                if (fac.spots && fac.spots.length > 0) {
-                  return fac;
+        const liveFacilities = await api.getFacilities();
+        if (isMounted && liveFacilities && liveFacilities.length > 0) {
+          const enriched = await Promise.all(
+            liveFacilities.map(async (fac) => {
+              if (fac.spots && fac.spots.length > 0) {
+                return fac;
+              }
+              try {
+                const detailed = await api.getFacility(fac.id);
+                if (detailed && detailed.spots && detailed.spots.length > 0) {
+                  return detailed;
                 }
-                try {
-                  const detailed = await api.getFacility(fac.id);
-                  if (detailed && detailed.spots && detailed.spots.length > 0) {
-                    return detailed;
-                  }
-                } catch {
-                  // Fallback to generated layout for this facility
-                }
-                return {
-                  ...fac,
-                  spots: generateFloorSpots(fac.id, 'Floor 1')
-                };
-              })
-            );
-            if (isMounted) setFacilities(enriched);
-          }
-        } catch (e) {
-          console.info('[ParkSpot] Live facilities sync skipped:', e.message);
+              } catch {
+                // Fallback to generated layout for this facility
+              }
+              return {
+                ...fac,
+                spots: generateFloorSpots(fac.id, 'Floor 1')
+              };
+            })
+          );
+          if (isMounted) setFacilities(enriched);
         }
-
-        // Fetch live bookings
-        try {
-          const liveBookings = await api.getBookings();
-          if (isMounted && liveBookings && liveBookings.length > 0) {
-            const formatted = liveBookings.map((b) => ({
-              id: b.id || b._id,
-              facilityName: b.lot?.name || b.lotId?.name || 'Central Business District Parking',
-              facilityAddress: b.lot?.address || b.lotId?.address || '14 Connaught Place',
-              floor: b.slot?.level || b.slotId?.level || 'Floor 1',
-              spotNumber: b.slot?.number || b.slotId?.number || 'A1',
-              startTime: new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              endTime: new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              startDateTime: b.startTime,
-              endDateTime: b.endTime,
-              duration: `${Math.round((new Date(b.endTime) - new Date(b.startTime)) / 3600000)} hours`,
-              status: b.status,
-              amount: b.totalAmount || 120,
-              qrCode: `PARK-${b.id || b._id}-CONFIRMED`,
-              verificationCode: `PS-PASS-${String(b.id || b._id).slice(-8).toUpperCase()}-${b.slot?.number || b.slotId?.number || 'A1'}`,
-              vehiclePlate: b.vehiclePlate || 'DL 01 AB 4920'
-            }));
-            // Pure live data: do not mix mock bookings into live backend mode
-            setBookings(formatted);
-          }
-        } catch (e) {
-          console.info('[ParkSpot] Live bookings sync skipped:', e.message);
-        }
-
-        // Fetch live audit logs for operator view
-        try {
-          const liveLogs = await api.getAuditLogs({ limit: 20 });
-          if (isMounted && liveLogs && liveLogs.length > 0) {
-            const formattedLogs = liveLogs.map((log) => ({
-              id: log._id || `AUD-${Math.random()}`,
-              timestamp: new Date(log.createdAt).toISOString().replace('T', ' ').slice(0, 19),
-              action: log.action,
-              entity: log.entityType ? `${log.entityType} #${log.entityId}` : `Entity #${log.entityId}`,
-              user: log.actorEmail || 'system',
-              source: log.source || 'Operational Activity',
-              status: 'SUCCESS'
-            }));
-            setAuditLogs(formattedLogs);
-          }
-        } catch (e) {
-          console.info('[ParkSpot] Live audit logs sync skipped:', e.message);
-        }
-      } catch (err) {
-        if (isMounted) setIsLiveConnected(false);
-      } finally {
-        if (isMounted) {
-          setTimeout(() => setIsAppInitializing(false), 450);
-        }
+      } catch (e) {
+        console.info('[ParkSpot] Facilities sync skipped:', e.message);
       }
     }
 
-    syncWithBackend();
+    syncFacilities();
 
     return () => {
       isMounted = false;
     };
   }, []);
 
+  // Fetch user-scoped bookings whenever driver user logs in / changes
+  useEffect(() => {
+    let isMounted = true;
+
+    async function syncUserBookings() {
+      if (!user || user.accountType !== 'DRIVER') {
+        if (isMounted) setBookings([]);
+        return;
+      }
+
+      try {
+        const liveBookings = await api.getBookings();
+        if (isMounted && liveBookings && Array.isArray(liveBookings)) {
+          const formatted = liveBookings.map((b) => ({
+            id: b.id || b._id,
+            facilityName: b.lot?.name || b.lotId?.name || 'Central Business District Parking',
+            facilityAddress: b.lot?.address || b.lotId?.address || '14 Connaught Place',
+            floor: b.slot?.level || b.slotId?.level || 'Floor 1',
+            spotNumber: b.slot?.number || b.slotId?.number || 'A1',
+            startTime: new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            endTime: new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            startDateTime: b.startTime,
+            endDateTime: b.endTime,
+            duration: `${Math.round((new Date(b.endTime) - new Date(b.startTime)) / 3600000)} hours`,
+            status: b.status,
+            amount: b.totalAmount || 120,
+            qrCode: `PARK-${b.id || b._id}-CONFIRMED`,
+            verificationCode: `PS-PASS-${String(b.id || b._id).slice(-8).toUpperCase()}-${b.slot?.number || b.slotId?.number || 'A1'}`,
+            vehiclePlate: b.vehiclePlate || ''
+          }));
+          setBookings(formatted);
+        } else if (isMounted) {
+          setBookings([]);
+        }
+      } catch (e) {
+        if (isMounted) setBookings([]);
+      }
+    }
+
+    syncUserBookings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  // Sync audit logs for operator view
+  useEffect(() => {
+    let isMounted = true;
+
+    async function syncOperatorLogs() {
+      if (!user || user.accountType !== 'OPERATOR') return;
+
+      try {
+        const liveLogs = await api.getAuditLogs({ limit: 20 });
+        if (isMounted && liveLogs && liveLogs.length > 0) {
+          const formattedLogs = liveLogs.map((log) => ({
+            id: log._id || `AUD-${Math.random()}`,
+            timestamp: new Date(log.createdAt).toISOString().replace('T', ' ').slice(0, 19),
+            action: log.action,
+            entity: log.entityType ? `${log.entityType} #${log.entityId}` : `Entity #${log.entityId}`,
+            user: log.actorEmail || 'system',
+            source: log.source || 'Operational Activity',
+            status: 'SUCCESS'
+          }));
+          setAuditLogs(formattedLogs);
+        }
+      } catch (e) {
+        console.info('[ParkSpot] Live audit logs sync skipped:', e.message);
+      }
+    }
+
+    syncOperatorLogs();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
   // Driver creates new reservation
   const handleAddBooking = useCallback(async (newBooking) => {
-    // 1. Update Local State
     setBookings((prev) => [newBooking, ...prev.filter((b) => b.id !== newBooking.id)]);
 
     setFacilities((prev) =>
@@ -188,7 +193,6 @@ function App() {
       })
     );
 
-    // 2. Append operational event & audit log
     const nowStr = new Date().toLocaleTimeString();
     setEvents((prev) => [
       {
@@ -209,14 +213,13 @@ function App() {
         timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
         action: 'BOOKING_CONFIRMED',
         entity: `Booking #${newBooking.id}`,
-        user: activeUser?.email || 'driver@parkspot.test',
+        user: user?.email || 'driver@parkspot',
         source: 'Razorpay Payment Gateway',
         status: 'SUCCESS'
       },
       ...prev
     ]);
 
-    // 3. Progressive Backend Sync (if live, not already persisted by payment service, and spot has MongoDB ObjectId)
     if (!newBooking.alreadyPersisted && isLiveConnected && newBooking.spotId && /^[a-f\d]{24}$/i.test(newBooking.spotId)) {
       try {
         const start = newBooking.startDateTime ? new Date(newBooking.startDateTime) : new Date();
@@ -231,7 +234,7 @@ function App() {
         console.warn('[ParkSpot] Background booking persist notice:', err.message);
       }
     }
-  }, [isLiveConnected, activeUser]);
+  }, [isLiveConnected, user]);
 
   // Driver cancels booking
   const handleCancelBooking = useCallback(async (bookingId) => {
@@ -254,7 +257,6 @@ function App() {
 
   // Operator manually overrides spot state
   const handleUpdateSpotStatus = useCallback(async (facilityId, floor, spotId, newStatus) => {
-    // 1. Optimistic Local State Update
     setFacilities((prev) =>
       prev.map((fac) => {
         if (fac.id === facilityId) {
@@ -267,21 +269,19 @@ function App() {
       })
     );
 
-    // 2. Append Audit Log
     setAuditLogs((prev) => [
       {
         id: `AUD-${Date.now()}`,
         timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
         action: `SPOT_STATUS_${newStatus}`,
         entity: `Spot #${spotId}`,
-        user: 'admin@urbanpark.test',
+        user: user?.email || 'operator@parkspot',
         source: 'B2B Admin Console',
         status: 'SUCCESS'
       },
       ...prev
     ]);
 
-    // 3. Progressive Backend Sync (if live & facility has MongoDB ObjectId)
     if (isLiveConnected && /^[a-f\d]{24}$/i.test(facilityId) && /^[a-f\d]{24}$/i.test(spotId)) {
       try {
         await api.ingestEvent(facilityId, {
@@ -294,35 +294,79 @@ function App() {
         console.warn('[ParkSpot] Background event ingestion notice:', err.message);
       }
     }
-  }, [isLiveConnected]);
+  }, [isLiveConnected, user]);
 
-  // Show branded FullScreenLoader during initial load
-  if (isAppInitializing) {
+  // Operator adds a new parking spot
+  const handleAddSpot = useCallback(async (facilityId, newSpot) => {
+    setFacilities((prev) =>
+      prev.map((fac) => {
+        if (fac.id === facilityId) {
+          const currentSpots = fac.spots || [];
+          const updatedSpots = [...currentSpots, newSpot];
+          const newFloors = fac.floors && fac.floors.includes(newSpot.floor)
+            ? fac.floors
+            : [...(fac.floors || ['Floor 1']), newSpot.floor];
+          return {
+            ...fac,
+            spots: updatedSpots,
+            totalSpots: (fac.totalSpots || currentSpots.length) + 1,
+            availableSpots: newSpot.status === 'AVAILABLE' ? (fac.availableSpots || 0) + 1 : fac.availableSpots,
+            floors: newFloors
+          };
+        }
+        return fac;
+      })
+    );
+
+    setAuditLogs((prev) => [
+      {
+        id: `AUD-${Date.now()}`,
+        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        action: 'SPOT_CREATED',
+        entity: `Spot #${newSpot.number} (${newSpot.floor})`,
+        user: user?.email || 'operator@parkspot',
+        source: 'B2B Admin Console',
+        status: 'SUCCESS'
+      },
+      ...prev
+    ]);
+  }, [user]);
+
+  // Show loading during authentication resolution
+  if (isLoading) {
     return (
       <FullScreenLoader
-        message="Initializing ParkSpot Smart Infrastructure..."
-        subtext="Connecting to live parking telemetry network"
+        message="Loading ParkSpot..."
+        subtext="Resolving secure account session"
       />
     );
   }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      {/* Top Application Header */}
-      <header className="app-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <div
-            className="brand"
-            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-            onClick={() => {
-              setCurrentMode('driver');
-              setDriverView('home');
-            }}
-          >
-            <Logo variant="full" size="sm" theme="dark" />
-          </div>
+  // =========================================================================
+  // DRIVER EXPERIENCE VIEW & HEADER (REQUIREMENT 19 & 21)
+  // =========================================================================
+  const renderDriverView = () => {
+    // ROUTE GUARD: Operator cannot access Driver experience
+    if (user && user.accountType === 'OPERATOR') {
+      return <Navigate to="/operator" replace />;
+    }
 
-          {currentMode === 'driver' && (
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        <header className="app-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+            <div
+              className="brand"
+              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              onClick={() => {
+                if (user) setDriverView('home');
+                else navigate('/');
+              }}
+              title="ParkSpot"
+            >
+              <Logo variant="full" size="nav" theme="dark" />
+            </div>
+
             <nav className="nav-links">
               <button
                 className={`nav-link ${driverView === 'home' || driverView === 'search' ? 'active' : ''}`}
@@ -336,73 +380,47 @@ function App() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer' }}
                 onClick={() => setDriverView('bookings')}
               >
-                My Bookings ({bookings.length})
+                My Bookings {user && `(${bookings.length})`}
               </button>
             </nav>
-          )}
-        </div>
-
-        {/* Global Controls & Mode Switcher Pill */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {/* Connection Status Pill */}
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.25rem 0.65rem',
-              borderRadius: '9999px',
-              fontSize: '0.6875rem',
-              fontWeight: 600,
-              backgroundColor: isLiveConnected ? 'var(--ps-state-available-bg)' : 'rgba(217, 119, 6, 0.12)',
-              color: isLiveConnected ? 'var(--ps-state-available)' : 'var(--ps-state-reserved)',
-              border: `1px solid ${isLiveConnected ? 'rgba(46, 125, 50, 0.25)' : 'rgba(217, 119, 6, 0.25)'}`
-            }}
-            title={isLiveConnected ? 'Connected to live Express + MongoDB backend' : 'Running in local progressive demo mode'}
-          >
-            <span
-              style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: isLiveConnected ? 'var(--ps-state-available)' : 'var(--ps-state-reserved)'
-              }}
-            />
-            <span>{isLiveConnected ? 'Live API' : 'Demo Mode'}</span>
           </div>
 
-          {/* Account / Sign In Trigger */}
-          <button
-            className="btn btn-secondary btn-sm"
-            style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}
-            onClick={() => setIsAuthModalOpen(true)}
-          >
-            {activeUser ? activeUser.name?.split(' ')[0] : 'Sign In'}
-          </button>
-
-          <div className="mode-pill">
-            <button
-              className={`mode-btn ${currentMode === 'driver' ? 'active' : ''}`}
-              onClick={() => {
-                setCurrentMode('driver');
-                setDriverView('home');
-              }}
-            >
-              Driver View
-            </button>
-            <button
-              className={`mode-btn ${currentMode === 'operator' ? 'active' : ''}`}
-              onClick={() => setCurrentMode('operator')}
-            >
-              Operator B2B
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {user ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--ps-primary-light)' }}>
+                    {user.name}
+                  </div>
+                  <div style={{ fontSize: '0.6875rem', color: 'rgba(244, 242, 231, 0.65)' }}>
+                    Account: Driver
+                  </div>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
+                  onClick={() => {
+                    logout();
+                    setBookings([]);
+                    navigate('/login');
+                  }}
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button
+                className="btn btn-secondary btn-sm"
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
+                onClick={() => navigate('/login')}
+              >
+                Sign In
+              </button>
+            )}
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Main Experience View */}
-      <main style={{ flex: 1, padding: '1rem 0 3rem' }}>
-        {currentMode === 'driver' ? (
+        <main style={{ flex: 1, padding: (driverView === 'home' || driverView === 'search') ? 0 : '1rem 0 3rem', display: 'flex', flexDirection: 'column' }}>
           <DriverExperience
             facilities={facilities}
             bookings={bookings}
@@ -411,40 +429,217 @@ function App() {
             activeView={driverView}
             setActiveView={setDriverView}
             isLiveConnected={isLiveConnected}
+            activeUser={user}
           />
-        ) : (
+        </main>
+
+        {!(driverView === 'home' || driverView === 'search') && (
+          <Footer
+            onNavigate={(targetMode, view) => {
+              if (targetMode === 'operator') {
+                navigate('/operator');
+              } else {
+                navigate('/driver');
+                if (view) setDriverView(view);
+              }
+            }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  // =========================================================================
+  // OPERATOR EXPERIENCE VIEW & HEADER (REQUIREMENT 20 & 21)
+  // =========================================================================
+  const renderOperatorView = () => {
+    // ROUTE GUARD: Operator routes require authenticated Operator
+    if (!user) {
+      return <Navigate to="/login" replace />;
+    }
+
+    // ROUTE GUARD: Driver is blocked from Operator view
+    if (user.accountType === 'DRIVER') {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', backgroundColor: 'var(--ps-background-primary)' }}>
+          <div className="card" style={{ maxWidth: '480px', textAlign: 'center', padding: '2.5rem 2rem' }}>
+            <div style={{ marginBottom: '1rem', color: '#DC2626' }}>
+              <ShieldAlert size={48} style={{ margin: '0 auto' }} />
+            </div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '0.75rem' }}>Access Restricted</h2>
+            <p style={{ color: 'var(--ps-secondary-dark)', fontSize: '0.875rem', marginBottom: '1.5rem', lineHeight: 1.5 }}>
+              Your account is registered as a <strong>DRIVER</strong>. The Operator Portal is strictly restricted to facility operator accounts.
+            </p>
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate('/driver')}
+            >
+              Return to Driver Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    const internalRoleDisplay = user.internalRole || (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(user.role) ? user.role : 'Manager');
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        <header className="app-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+            <div
+              className="brand"
+              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              onClick={() => navigate('/operator')}
+              title="ParkSpot Operator"
+            >
+              <Logo variant="full" size="nav" theme="dark" />
+            </div>
+
+            <nav className="nav-links" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+              <button
+                className={`nav-link ${operatorTab === 'dashboard' ? 'active' : ''}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => setOperatorTab('dashboard')}
+              >
+                Dashboard
+              </button>
+              <button
+                className={`nav-link ${operatorTab === 'live-parking' ? 'active' : ''}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => setOperatorTab('live-parking')}
+              >
+                Live Parking
+              </button>
+              <button
+                className={`nav-link ${operatorTab === 'bookings' ? 'active' : ''}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => setOperatorTab('bookings')}
+              >
+                Bookings
+              </button>
+              <button
+                className={`nav-link ${operatorTab === 'facilities' ? 'active' : ''}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => setOperatorTab('facilities')}
+              >
+                Facilities
+              </button>
+              <button
+                className={`nav-link ${operatorTab === 'analytics' ? 'active' : ''}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => setOperatorTab('analytics')}
+              >
+                Analytics
+              </button>
+              <button
+                className={`nav-link ${operatorTab === 'optimization' ? 'active' : ''}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => setOperatorTab('optimization')}
+              >
+                Optimization
+              </button>
+              <button
+                className={`nav-link ${operatorTab === 'assistant' || operatorTab === 'copilot' ? 'active' : ''}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => setOperatorTab('copilot')}
+              >
+                ParkSpot Copilot
+              </button>
+            </nav>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--ps-primary-light)' }}>
+                {user.name}
+              </div>
+              <div style={{ fontSize: '0.6875rem', color: 'rgba(244, 242, 231, 0.65)' }}>
+                Role: {internalRoleDisplay} · {user.organizationName || 'ParkSpot Operations'}
+              </div>
+            </div>
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
+              onClick={() => {
+                logout();
+                navigate('/login');
+              }}
+            >
+              Sign Out
+            </button>
+          </div>
+        </header>
+
+        <main style={{ flex: 1 }}>
           <OperatorExperience
             facilities={facilities}
             events={events}
             auditLogs={auditLogs}
             bookings={bookings}
             onUpdateSpotStatus={handleUpdateSpotStatus}
+            onAddSpot={handleAddSpot}
             isLiveConnected={isLiveConnected}
-            activeUser={activeUser}
+            activeUser={user}
+            activeTab={operatorTab}
+            onTabChange={setOperatorTab}
           />
-        )}
-      </main>
+        </main>
 
-      {/* Official Brand Footer */}
-      <Footer
-        onNavigate={(mode, view) => {
-          setCurrentMode(mode);
-          if (view) setDriverView(view);
-        }}
-      />
+        <Footer
+          onNavigate={(targetMode, view) => {
+            if (targetMode === 'operator') {
+              navigate('/operator');
+            } else {
+              navigate('/driver');
+              if (view) setDriverView(view);
+            }
+          }}
+        />
+      </div>
+    );
+  };
 
-      {/* Login & Signup Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        defaultRole={currentMode}
-        onAuthSuccess={(user, role) => {
-          setActiveUser(user);
-          if (role === 'operator') setCurrentMode('operator');
-          else setCurrentMode('driver');
-        }}
+  return (
+    <Routes>
+      <Route
+        path="/"
+        element={
+          <LandingPage
+            activeUser={user}
+          />
+        }
       />
-    </div>
+      <Route
+        path="/login"
+        element={
+          <LoginPage />
+        }
+      />
+      <Route
+        path="/login/:portal"
+        element={
+          <LoginPage />
+        }
+      />
+      <Route
+        path="/driver"
+        element={renderDriverView()}
+      />
+      <Route
+        path="/operator"
+        element={renderOperatorView()}
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

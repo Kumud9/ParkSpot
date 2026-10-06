@@ -21,7 +21,7 @@ export function Footer({ onNavigate }) {
           {/* Brand Column */}
           <div>
             <div style={{ marginBottom: '1rem' }}>
-              <Logo size="sm" theme="dark" />
+              <Logo size="md" theme="dark" />
             </div>
             <p style={{
               fontSize: '0.8125rem',

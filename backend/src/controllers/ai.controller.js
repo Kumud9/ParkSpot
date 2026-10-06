@@ -103,7 +103,36 @@ async function explainRecommendation(req, res, next) {
   }
 }
 
+const copilotService = require('../services/copilot.service');
+
+const chatSchema = z.object({
+  messages: z.array(
+    z.object({
+      role: z.enum(['user', 'assistant', 'system']),
+      content: z.string().trim().min(1).max(2000)
+    })
+  ).min(1),
+  facilityId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable()
+});
+
+async function chatCopilot(req, res, next) {
+  try {
+    const data = chatSchema.parse(req.body);
+    const orgId = req.user.organizationId;
+    const result = await copilotService.processCopilotChat({
+      organizationId: orgId,
+      userId: req.user.sub,
+      messages: data.messages,
+      facilityId: data.facilityId
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getInsights,
-  explainRecommendation
+  explainRecommendation,
+  chatCopilot
 };

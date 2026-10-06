@@ -5,17 +5,45 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 // Storage keys
-const DRIVER_TOKEN_KEY = 'parkspot_driver_token';
-const OPERATOR_TOKEN_KEY = 'parkspot_operator_token';
+const AUTH_TOKEN_KEY = 'parkspot_auth_token';
+const AUTH_USER_KEY = 'parkspot_auth_user';
 
 export const authStorage = {
-  getDriverToken: () => localStorage.getItem(DRIVER_TOKEN_KEY),
-  setDriverToken: (token) => localStorage.setItem(DRIVER_TOKEN_KEY, token),
-  clearDriverToken: () => localStorage.removeItem(DRIVER_TOKEN_KEY),
+  getToken: () => localStorage.getItem(AUTH_TOKEN_KEY),
+  setToken: (token) => {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+  },
+  clearToken: () => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem('parkspot_driver_token');
+    localStorage.removeItem('parkspot_operator_token');
+  },
+  getUser: () => {
+    try {
+      const u = localStorage.getItem(AUTH_USER_KEY);
+      return u ? JSON.parse(u) : null;
+    } catch {
+      return null;
+    }
+  },
+  setUser: (user) => {
+    if (user) {
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(AUTH_USER_KEY);
+    }
+  },
+  clearUser: () => localStorage.removeItem(AUTH_USER_KEY),
 
-  getOperatorToken: () => localStorage.getItem(OPERATOR_TOKEN_KEY),
-  setOperatorToken: (token) => localStorage.setItem(OPERATOR_TOKEN_KEY, token),
-  clearOperatorToken: () => localStorage.removeItem(OPERATOR_TOKEN_KEY)
+  // Backwards compatibility wrappers
+  getDriverToken: () => localStorage.getItem(AUTH_TOKEN_KEY),
+  setDriverToken: (token) => localStorage.setItem(AUTH_TOKEN_KEY, token),
+  clearDriverToken: () => localStorage.removeItem(AUTH_TOKEN_KEY),
+
+  getOperatorToken: () => localStorage.getItem(AUTH_TOKEN_KEY),
+  setOperatorToken: (token) => localStorage.setItem(AUTH_TOKEN_KEY, token),
+  clearOperatorToken: () => localStorage.removeItem(AUTH_TOKEN_KEY)
 };
 
 /**
@@ -23,24 +51,57 @@ export const authStorage = {
  */
 async function request(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
+  const rawToken = authStorage.getToken();
+  const cleanToken = (typeof rawToken === 'string' && rawToken.trim() && rawToken !== 'null' && rawToken !== 'undefined')
+    ? rawToken.trim().replace(/^Bearer\s+/i, '')
+    : null;
+
   const headers = {
     'Content-Type': 'application/json',
+    ...(cleanToken ? { Authorization: `Bearer ${cleanToken}` } : {}),
     ...(options.headers || {})
   };
+
+  // Strip duplicate Bearer prefixes, null, or undefined if passed via options
+  if (headers.Authorization) {
+    const stripped = String(headers.Authorization).replace(/^(Bearer\s+)+/i, '').trim();
+    if (!stripped || stripped === 'null' || stripped === 'undefined') {
+      delete headers.Authorization;
+    } else {
+      headers.Authorization = `Bearer ${stripped}`;
+    }
+  }
 
   try {
     const res = await fetch(url, { ...options, headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const errorMsg = data?.error?.message || data?.message || `HTTP error ${res.status}`;
+      if (res.status === 401) {
+        authStorage.clearToken();
+      }
+      let errorMsg = data?.error?.message || data?.message || `HTTP error ${res.status}`;
+      if (data?.error?.details?.fieldErrors) {
+        const parts = [];
+        for (const [field, msgs] of Object.entries(data.error.details.fieldErrors)) {
+          if (Array.isArray(msgs) && msgs.length > 0) {
+            parts.push(`${field}: ${msgs.join(', ')}`);
+          }
+        }
+        if (parts.length > 0 && errorMsg.includes('One or more fields are invalid')) {
+          errorMsg = parts.join('. ');
+        }
+      }
       const err = new Error(errorMsg);
       err.status = res.status;
+      err.code = data?.error?.code;
       err.data = data;
       throw err;
     }
     return data;
   } catch (err) {
-    console.warn(`[ParkSpot API] Request to ${url} failed:`, err.message);
+    if (err.status !== 401 && !url.includes('/auth/me')) {
+      console.warn(`[ParkSpot API] Request to ${url} failed:`, err.message);
+    }
     throw err;
   }
 }
@@ -51,7 +112,7 @@ async function request(endpoint, options = {}) {
 export function normalizeSpot(slot, defaultRate = 40) {
   let status = slot.status || 'AVAILABLE';
   if (slot.available === false && status === 'AVAILABLE') {
-    status = 'OCCUPIED';
+    status = 'RESERVED';
   }
   return {
     id: slot._id ? String(slot._id) : slot.id,
@@ -60,7 +121,8 @@ export function normalizeSpot(slot, defaultRate = 40) {
     type: slot.type || 'STANDARD',
     status: status,
     rate: slot.hourlyRate || defaultRate,
-    coordinates: slot.coordinates || null
+    coordinates: slot.coordinates || null,
+    bookingInfo: slot.bookingInfo || null
   };
 }
 
@@ -134,12 +196,41 @@ export const api = {
   /**
    * Auth: Login user / operator
    */
-  async login(email, password) {
+  async login(email, password, accountType = null) {
     const data = await request('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({
+        email,
+        password,
+        ...(accountType ? { accountType: String(accountType).toUpperCase() } : {})
+      })
     });
     return data;
+  },
+
+  /**
+   * Auth: Register new user / driver / operator
+   */
+  async register({ email, password, name, accountType, organizationName, role }) {
+    const data = await request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name, accountType, organizationName, role })
+    });
+    return data;
+  },
+
+  /**
+   * Auth: Fetch current authenticated profile
+   */
+  async getMe() {
+    const token = authStorage.getToken();
+    if (!token) return null;
+    try {
+      const data = await request('/auth/me');
+      return data?.user || null;
+    } catch {
+      return null;
+    }
   },
 
   /**
@@ -150,6 +241,44 @@ export const api = {
     const data = await request(`/lots${query}`);
     const rawList = data.lots || data.facilities || [];
     return rawList.map(normalizeFacility);
+  },
+
+  /**
+   * Public Location-Based Facilities Discovery (Phase 4.4)
+   */
+  async getNearbyFacilities({ lat, lng, radius = 3, sortBy = 'recommended', parkingType = 'ALL', minAvailable, maxPrice } = {}) {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lng: String(lng),
+      radius: String(radius),
+      sortBy
+    });
+    if (parkingType && parkingType !== 'ALL') {
+      params.append('parkingType', parkingType);
+    }
+    if (minAvailable) {
+      params.append('minAvailable', String(minAvailable));
+    }
+    if (maxPrice) {
+      params.append('maxPrice', String(maxPrice));
+    }
+
+    const data = await request(`/lots/nearby?${params.toString()}`);
+    const rawList = data.facilities || [];
+    return {
+      facilities: rawList.map((f) => ({
+        ...normalizeFacility(f),
+        distanceKm: f.distanceKm,
+        distanceFormatted: f.distanceFormatted,
+        latitude: f.latitude,
+        longitude: f.longitude,
+        startingPrice: f.startingPrice || f.hourlyRate,
+        isOpen: f.isOpen,
+        operatingHours: f.operatingHours,
+        supportedTypes: f.supportedTypes || ['STANDARD']
+      })),
+      search: data.search || { latitude: lat, longitude: lng, radiusKm: radius, totalFound: rawList.length }
+    };
   },
 
   /**
@@ -166,45 +295,50 @@ export const api = {
   },
 
   /**
+   * Enforce that a valid JWT exists for protected API endpoints
+   */
+  requireToken() {
+    const rawToken = authStorage.getToken();
+    const clean = (typeof rawToken === 'string' && rawToken.trim() && rawToken !== 'null' && rawToken !== 'undefined')
+      ? rawToken.trim().replace(/^Bearer\s+/i, '')
+      : null;
+    if (!clean) {
+      const err = new Error('Your session has expired. Please sign in again to continue.');
+      err.status = 401;
+      err.code = 'AUTH_REQUIRED';
+      throw err;
+    }
+    return clean;
+  },
+
+  /**
    * Driver: Ensure authenticated session for driver API requests
    */
   async ensureDriverAuth() {
-    let token = authStorage.getDriverToken();
-    if (token) return token;
-    try {
-      const auth = await api.login('user@parkspot.test', 'Pass@12345');
-      if (auth?.token) {
-        authStorage.setDriverToken(auth.token);
-        return auth.token;
-      }
-    } catch (e) {
-      console.info('[ParkSpot API] Auto-driver auth fallback note:', e.message);
-    }
-    return null;
+    return api.requireToken();
   },
 
   /**
    * Driver: List user bookings
    */
   async getBookings() {
-    await api.ensureDriverAuth();
-    const token = authStorage.getDriverToken();
-    if (!token) return null;
-    const data = await request('/bookings', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    return data.bookings || [];
+    const token = authStorage.getToken();
+    if (!token) return [];
+    try {
+      const data = await request('/bookings');
+      return data.bookings || [];
+    } catch {
+      return [];
+    }
   },
 
   /**
    * Driver: Create booking
    */
   async createBooking(bookingPayload) {
-    await api.ensureDriverAuth();
-    const token = authStorage.getDriverToken();
+    api.requireToken();
     const data = await request('/bookings', {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify(bookingPayload)
     });
     return data.booking;
@@ -214,11 +348,9 @@ export const api = {
    * Driver: Cancel booking
    */
   async cancelBooking(bookingId) {
-    await api.ensureDriverAuth();
-    const token = authStorage.getDriverToken();
+    api.requireToken();
     const data = await request(`/bookings/${bookingId}/cancel`, {
-      method: 'PATCH',
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      method: 'PATCH'
     });
     return data.booking;
   },
@@ -227,11 +359,9 @@ export const api = {
    * Payment: Create payment order for a booking
    */
   async createPaymentOrder(bookingId) {
-    await api.ensureDriverAuth();
-    const token = authStorage.getDriverToken();
+    api.requireToken();
     const data = await request('/v1/payments/order', {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify({ bookingId })
     });
     return data;
@@ -241,11 +371,9 @@ export const api = {
    * Payment: Verify completed payment
    */
   async verifyPayment({ orderId, paymentId, signature }) {
-    await api.ensureDriverAuth();
-    const token = authStorage.getDriverToken();
+    api.requireToken();
     const data = await request('/v1/payments/verify', {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify({ orderId, paymentId, signature })
     });
     return data;
@@ -254,19 +382,8 @@ export const api = {
   /**
    * Operator: Ensure authenticated operator session
    */
-  async ensureOperatorAuth(email = 'admin@urbanpark.test', password = 'Pass@12345') {
-    let token = authStorage.getOperatorToken();
-    if (token) return token;
-    try {
-      const auth = await api.login(email, password);
-      if (auth?.token) {
-        authStorage.setOperatorToken(auth.token);
-        return auth.token;
-      }
-    } catch (e) {
-      console.info('[ParkSpot API] Auto-operator auth note:', e.message);
-    }
-    return null;
+  async ensureOperatorAuth() {
+    return authStorage.getToken();
   },
 
   /**
@@ -307,6 +424,33 @@ export const api = {
       body: JSON.stringify({ status })
     });
     return data;
+  },
+
+  /**
+   * Operator: Create parking spot in facility
+   */
+  async createSpot(facilityId, spotData) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const data = await request(`/admin/lots/${facilityId}/slots`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: JSON.stringify(spotData)
+    });
+    return data.slot || data.spot || data;
+  },
+
+  /**
+   * Operator: List spots in facility
+   */
+  async listFacilitySpots(facilityId, params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    const data = await request(`/admin/lots/${facilityId}/slots${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data.slots || data.spots || [];
   },
 
   /**
@@ -431,6 +575,20 @@ export const api = {
     const data = await request(`/v1/ai/explain-recommendation/${id}`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data;
+  },
+
+  /**
+   * Operator: Conversational ParkSpot Copilot Chat
+   */
+  async chatCopilot({ messages, facilityId = null }) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const data = await request('/v1/ai/copilot/chat', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: JSON.stringify({ messages, facilityId })
     });
     return data;
   },

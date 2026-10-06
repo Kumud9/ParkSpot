@@ -8,6 +8,7 @@ const { authenticate, authorize, requireTenant } = require('../../middleware/aut
 const router = express.Router();
 
 // Public facility discovery
+router.get('/nearby', facilityController.getNearby);
 router.get('/search', facilityController.listPublic);
 router.get('/:id/public', facilityController.getPublicById);
 

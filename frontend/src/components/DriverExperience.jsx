@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ParkingMap } from './ParkingMap';
 import { VehicleTopDown } from './VehicleTopDown';
-import { api } from '../services/api';
+import { api, authStorage } from '../services/api';
 import {
   MapPin,
   Clock,
@@ -25,10 +26,22 @@ import {
   Ticket,
   Info,
   Loader2,
-  CheckCircle
+  CheckCircle,
+  Download,
+  Lock,
+  QrCode,
+  Wrench
 } from 'lucide-react';
 import { Logo } from './shared/Logo';
 import { MapLoader, PaymentLoader, ActionLoader } from './shared/Loading';
+import LocationSearch from './parking/LocationSearch';
+import NearbyParkingMap from './parking/NearbyParkingMap';
+import NearbyFacilityCard from './parking/NearbyFacilityCard';
+import ItinerarySearchBar from './parking/ItinerarySearchBar';
+import './parking/driver-discovery.css';
+import { locationService } from '../services/locationService';
+import { receiptService } from '../services/receiptService';
+import { PaymentSuccessAnimation } from './payment/PaymentSuccessAnimation';
 
 export function DriverExperience({
   facilities = [],
@@ -37,7 +50,8 @@ export function DriverExperience({
   onCancelBooking,
   activeView,
   setActiveView,
-  isLiveConnected = false
+  isLiveConnected = false,
+  activeUser = null
 }) {
   // -------------------------------------------------------------
   // FACILITY & SPOT SELECTION STATE
@@ -45,9 +59,117 @@ export function DriverExperience({
   const [selectedFacility, setSelectedFacility] = useState(() => facilities[0] || null);
   const [activeFloor, setActiveFloor] = useState('Floor 1');
   const [selectedSpot, setSelectedSpot] = useState(null);
+  const [inspectedNonAvailSpot, setInspectedNonAvailSpot] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('ALL');
   const [isFacilityLoading, setIsFacilityLoading] = useState(false);
+  const [conflictNotice, setConflictNotice] = useState(null);
+
+  // -------------------------------------------------------------
+  // PHASE 4.4: LOCATION DISCOVERY STATE
+  // -------------------------------------------------------------
+  const [destination, setDestination] = useState(() => ({
+    lat: 23.0734,
+    lng: 72.6266,
+    name: 'Ahmedabad Airport',
+    city: 'Ahmedabad',
+    isCurrentLocation: false
+  }));
+  const [nearbyRadius, setNearbyRadius] = useState(3); // 1, 3, 5, 10 km
+  const [nearbySort, setNearbySort] = useState('recommended'); // 'recommended', 'nearest', 'price', 'availability'
+  const [nearbyParkingType, setNearbyParkingType] = useState('ALL'); // 'ALL', 'EV', 'ACCESSIBLE', 'STANDARD'
+  const [nearbyFacilities, setNearbyFacilities] = useState([]);
+  const [isSearchingNearby, setIsSearchingNearby] = useState(false);
+  const [highlightedFacility, setHighlightedFacility] = useState(null);
+  const [hoveredFacilityId, setHoveredFacilityId] = useState(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
+  const routerLocation = useLocation();
+
+  // Sync destination if passed from Landing Page search
+  useEffect(() => {
+    if (routerLocation.state?.destination) {
+      setDestination(routerLocation.state.destination);
+    }
+  }, [routerLocation.state]);
+
+  // Fetch nearby facilities when destination, radius, sort, or type filter changes
+  useEffect(() => {
+    let isCancelled = false;
+    async function loadNearby() {
+      if (!destination?.lat || !destination?.lng) return;
+      setIsSearchingNearby(true);
+      try {
+        const res = await api.getNearbyFacilities({
+          lat: destination.lat,
+          lng: destination.lng,
+          radius: nearbyRadius,
+          sortBy: nearbySort,
+          parkingType: nearbyParkingType
+        });
+        if (!isCancelled) {
+          const list = res.facilities || [];
+          setNearbyFacilities(list);
+          if (list.length > 0) {
+            setHighlightedFacility((prev) => {
+              if (prev && list.some((f) => String(f.id) === String(prev.id))) {
+                return prev;
+              }
+              return list[0];
+            });
+          } else {
+            setHighlightedFacility(null);
+          }
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          console.warn('[DriverExperience] Live nearby search failed:', err.message);
+          // Graceful fallback from facilities prop
+          const localList = facilities.map((f) => ({
+            ...f,
+            distanceFormatted: 'Nearby',
+            availableSpots: f.availableSpots ?? 24,
+            startingPrice: f.hourlyRate || 40,
+            isOpen: true,
+            supportedTypes: ['STANDARD', 'EV']
+          }));
+          setNearbyFacilities(localList);
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsSearchingNearby(false);
+        }
+      }
+    }
+
+    loadNearby();
+    return () => { isCancelled = true; };
+  }, [destination, nearbyRadius, nearbySort, nearbyParkingType, isLiveConnected, refreshNonce]);
+
+  // Periodic silent availability refresh (15 seconds) without resetting map position
+  useEffect(() => {
+    if (activeView !== 'home' && activeView !== 'search') return;
+    if (!destination?.lat || !destination?.lng) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const res = await api.getNearbyFacilities({
+          lat: destination.lat,
+          lng: destination.lng,
+          radius: nearbyRadius,
+          sortBy: nearbySort,
+          parkingType: nearbyParkingType
+        });
+        if (res && res.facilities && Array.isArray(res.facilities)) {
+          setNearbyFacilities(res.facilities);
+        }
+      } catch (_err) {
+        // Silently continue
+      }
+    }, 15000);
+
+    return () => clearInterval(intervalId);
+  }, [activeView, destination, nearbyRadius, nearbySort, nearbyParkingType]);
 
   // Sync selected facility if facilities list updates and none was selected
   useEffect(() => {
@@ -102,7 +224,7 @@ export function DriverExperience({
   const [bookingDate, setBookingDate] = useState(getTodayDateStr);
   const [bookingStartTime, setBookingStartTime] = useState(getNextHourStr);
   const [bookingDuration, setBookingDuration] = useState(2); // hours
-  const [vehiclePlate, setVehiclePlate] = useState('DL 01 AB 4920');
+  const [vehiclePlate, setVehiclePlate] = useState('');
   const [validationErrors, setValidationErrors] = useState({});
 
   // Compute calculated end time
@@ -167,6 +289,14 @@ export function DriverExperience({
   const [paymentError, setPaymentError] = useState(null);
   const [simulateFailure, setSimulateFailure] = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState(null);
+  const [showCoinAnimation, setShowCoinAnimation] = useState(false);
+  const [upiMode, setUpiMode] = useState('vpa'); // 'vpa' | 'qr'
+  const [upiId, setUpiId] = useState('');
+  const [upiError, setUpiError] = useState('');
+  const [selectedBank, setSelectedBank] = useState('HDFC Bank');
+  const [cardHolder, setCardHolder] = useState(activeUser?.name || '');
+  const [cardNumber, setCardNumber] = useState('•••• •••• •••• 4028');
+  const [cardExpiry, setCardExpiry] = useState('08/28');
 
   // -------------------------------------------------------------
   // MY BOOKINGS & CANCELLATION STATE
@@ -194,20 +324,66 @@ export function DriverExperience({
   }, [facilities, searchQuery, selectedFilter]);
 
   // -------------------------------------------------------------
+  // ACTIONS: REFRESH & SYNCHRONIZATION
+  // -------------------------------------------------------------
+  const refreshFacilitySpots = useCallback(async (facilityIdOverride, customWindow) => {
+    const targetFacilityId = facilityIdOverride || selectedFacility?.id;
+    if (!targetFacilityId || !/^[a-f\d]{24}$/i.test(String(targetFacilityId))) return null;
+
+    let windowParams = customWindow;
+    if (!windowParams && bookingDate && bookingStartTime) {
+      try {
+        const startIso = new Date(`${bookingDate}T${bookingStartTime}:00`).toISOString();
+        const endIso = new Date(new Date(`${bookingDate}T${bookingStartTime}:00`).getTime() + bookingDuration * 3600000).toISOString();
+        windowParams = { startTime: startIso, endTime: endIso };
+      } catch (_e) {}
+    }
+
+    try {
+      const fresh = await api.getFacility(targetFacilityId, windowParams);
+      if (fresh && fresh.spots) {
+        setSelectedFacility((prev) => {
+          if (!prev) return fresh;
+          return {
+            ...prev,
+            ...fresh,
+            spots: fresh.spots
+          };
+        });
+        return fresh;
+      }
+    } catch (err) {
+      console.warn('[DriverExperience] refreshFacilitySpots note:', err.message);
+    }
+    return null;
+  }, [selectedFacility?.id, bookingDate, bookingStartTime, bookingDuration]);
+
+  // Periodic silent availability sync (every 8 seconds) while browsing facility map
+  useEffect(() => {
+    if (activeView !== 'facility' || !selectedFacility?.id) return;
+    refreshFacilitySpots();
+
+    const intervalId = setInterval(() => {
+      refreshFacilitySpots();
+    }, 8000);
+
+    return () => clearInterval(intervalId);
+  }, [activeView, selectedFacility?.id, refreshFacilitySpots]);
+
+  // -------------------------------------------------------------
   // ACTIONS: FACILITY & SPOT
   // -------------------------------------------------------------
   const handleSelectFacility = async (fac) => {
     setSelectedFacility(fac);
     setSelectedSpot(null);
+    setInspectedNonAvailSpot(null);
+    setConflictNotice(null);
     setActiveView('facility');
 
     if (isLiveConnected && /^[a-f\d]{24}$/i.test(fac.id)) {
       setIsFacilityLoading(true);
       try {
-        const fresh = await api.getFacility(fac.id);
-        if (fresh && fresh.spots) {
-          setSelectedFacility(fresh);
-        }
+        await refreshFacilitySpots(fac.id);
       } catch (err) {
         console.info('[ParkSpot] Live facility fetch note:', err.message);
       } finally {
@@ -217,8 +393,13 @@ export function DriverExperience({
   };
 
   const handleSpotClick = (spot) => {
+    setConflictNotice(null);
     if (spot.status === 'AVAILABLE') {
       setSelectedSpot(spot);
+      setInspectedNonAvailSpot(null);
+    } else {
+      setSelectedSpot(null);
+      setInspectedNonAvailSpot(spot);
     }
   };
 
@@ -262,7 +443,7 @@ export function DriverExperience({
       return;
     }
 
-    // If live connected, do a quick window check for conflict
+    // Re-check live spot availability for requested window before proceeding
     if (isLiveConnected && selectedFacility?.id && selectedSpot?.id) {
       try {
         const startIso = new Date(`${bookingDate}T${bookingStartTime}:00`).toISOString();
@@ -271,7 +452,13 @@ export function DriverExperience({
         if (fresh?.spots) {
           const matchingSpot = fresh.spots.find((s) => s.id === selectedSpot.id || s.number === selectedSpot.number);
           if (matchingSpot && (matchingSpot.status === 'OCCUPIED' || matchingSpot.status === 'RESERVED')) {
-            setValidationErrors({ general: `Spot ${selectedSpot.number} has just been reserved for this time window. Please pick another spot.` });
+            setSelectedSpot(null);
+            await refreshFacilitySpots();
+            setConflictNotice({
+              title: 'This spot was just booked.',
+              message: 'Please choose another available spot.'
+            });
+            setActiveView('facility');
             return;
           }
         }
@@ -292,6 +479,15 @@ export function DriverExperience({
       return;
     }
 
+    if (paymentMethod === 'UPI' && upiMode === 'vpa') {
+      const cleanVpa = upiId.trim();
+      if (cleanVpa && !/^[\w.-]+@[\w.-]+$/.test(cleanVpa)) {
+        setUpiError('Please enter a valid UPI ID (e.g. mobile@upi or username@okhdfcbank)');
+        return;
+      }
+    }
+    setUpiError('');
+
     setPaymentState('PROCESSING');
     setPaymentError(null);
 
@@ -300,6 +496,13 @@ export function DriverExperience({
 
     // 1. LIVE BACKEND PAYMENT WORKFLOW
     if (isLiveConnected && selectedSpot?.id && /^[a-f\d]{24}$/i.test(selectedSpot.id)) {
+      const currentToken = authStorage.getToken();
+      if (!currentToken || !activeUser) {
+        setShowCoinAnimation(false);
+        setPaymentState('FAILED');
+        setPaymentError('Your session has expired. Please sign in again to continue your reservation.');
+        return;
+      }
       try {
         // Step A: Create booking document on backend
         const bookingDoc = await api.createBooking({
@@ -326,6 +529,7 @@ export function DriverExperience({
             });
           } catch (verifyErr) {
             setPaymentState('FAILED');
+            setShowCoinAnimation(false);
             setPaymentError(verifyErr.message || 'Payment signature verification failed.');
             return;
           }
@@ -364,11 +568,38 @@ export function DriverExperience({
         onAddBooking && onAddBooking(newBooking);
         setConfirmedBooking(newBooking);
         setPaymentState('SUCCESS');
-        setActiveView('confirmed');
+        setShowCoinAnimation(true);
+        refreshFacilitySpots();
       } catch (err) {
-        if (err.status === 409 || err.message?.includes('SLOT_UNAVAILABLE') || err.message?.includes('available')) {
-          setPaymentState('CONFLICT');
-          setPaymentError(`Spot ${selectedSpot.number} was just booked or is unavailable for this time window. Please select another spot.`);
+        setShowCoinAnimation(false);
+        const isConflict =
+          err.status === 409 ||
+          err.code === 'SPOT_ALREADY_BOOKED' ||
+          err.message?.includes('SLOT_UNAVAILABLE') ||
+          err.message?.includes('SPOT_ALREADY_BOOKED') ||
+          err.message?.toLowerCase().includes('already booked') ||
+          err.message?.toLowerCase().includes('unavailable');
+
+        if (isConflict) {
+          setSelectedSpot(null);
+          await refreshFacilitySpots();
+          setActiveView('facility');
+          setConflictNotice({
+            title: 'This spot was just booked.',
+            message: 'Please choose another available spot.'
+          });
+          setPaymentState('IDLE');
+          setPaymentError(null);
+          return;
+        } else if (
+          err.status === 401 ||
+          err.code === 'AUTH_REQUIRED' ||
+          err.message?.toLowerCase().includes('bearer') ||
+          err.message?.toLowerCase().includes('token') ||
+          err.message?.toLowerCase().includes('session')
+        ) {
+          setPaymentState('FAILED');
+          setPaymentError('Your session has expired. Please sign in again to continue your reservation.');
         } else {
           setPaymentState('FAILED');
           setPaymentError(err.message || 'Payment session could not be completed.');
@@ -381,7 +612,8 @@ export function DriverExperience({
     setTimeout(() => {
       if (simulateFailure) {
         setPaymentState('FAILED');
-        setPaymentError('Demo Mode: Simulated card issuer decline. Payment was not authorized.');
+        setShowCoinAnimation(false);
+        setPaymentError('Payment Verification Failed: Gateway declined payment authorization. Please try another payment instrument.');
         return;
       }
 
@@ -411,7 +643,7 @@ export function DriverExperience({
       onAddBooking && onAddBooking(newBooking);
       setConfirmedBooking(newBooking);
       setPaymentState('SUCCESS');
-      setActiveView('confirmed');
+      setShowCoinAnimation(true);
     }, 600);
   };
 
@@ -432,6 +664,7 @@ export function DriverExperience({
         message: `Reservation #${cancelModalBooking.id} for Spot ${cancelModalBooking.spotNumber} has been successfully cancelled.`
       });
       setCancelModalBooking(null);
+      refreshFacilitySpots();
     } catch (err) {
       setCancelNotification({
         type: 'error',
@@ -599,192 +832,252 @@ export function DriverExperience({
             Software-based digital access credential. Present to facility staff or check-in attendant upon entry.
           </p>
 
-          {onClose && (
-            <button className="btn btn-secondary btn-block" style={{ marginTop: '1.25rem' }} onClick={onClose}>
-              Close Pass
+          <div style={{ display: 'flex', gap: '0.65rem', marginTop: '1.25rem' }}>
+            <button
+              type="button"
+              className="download-receipt-btn"
+              style={{ flex: 1, justifyContent: 'center' }}
+              onClick={() => receiptService.downloadReceipt(booking)}
+            >
+              <Download size={15} />
+              <span>Download Receipt</span>
             </button>
-          )}
+            {onClose && (
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
+                Close Pass
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
   };
 
   // =========================================================================
-  // SCREEN 1: FIND PARKING & SCREEN 2: SEARCH FACILITIES
+  // MAP-FIRST DRIVER FIND PARKING EXPERIENCE (70-75% MAP, 25-30% SIDEBAR)
+  // =========================================================================
+  // =========================================================================
+  // PARKSPOT — REDESIGNED DRIVER DISCOVERY / FIND PARKING PAGE
   // =========================================================================
   if (activeView === 'home' || activeView === 'search') {
+    const currentContextFacility = highlightedFacility || nearbyFacilities[0] || null;
+
     return (
-      <div className="container">
-        {/* Connection status banner for transparency */}
-        {!isLiveConnected && (
-          <div style={{
-            backgroundColor: 'rgba(217, 119, 6, 0.1)',
-            border: '1px solid rgba(217, 119, 6, 0.3)',
-            borderRadius: 'var(--ps-radius-sm)',
-            padding: '0.5rem 1rem',
-            marginBottom: '1.5rem',
-            fontSize: '0.8125rem',
-            color: 'var(--ps-primary-dark)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
-          }}>
-            <Info size={16} color="var(--ps-state-reserved)" />
-            <span><strong>Demo Mode Active:</strong> Operating with local simulated parking network. Connect backend API to interact with live facilities.</span>
-          </div>
-        )}
+      <div className="driver-discovery-page">
+        {/* 1. TOP COMPACT ITINERARY / SEARCH BAR */}
+        <ItinerarySearchBar
+          destination={destination}
+          onDestinationSelect={(loc) => {
+            setDestination(loc);
+            setHighlightedFacility(null);
+          }}
+          bookingDate={bookingDate}
+          onDateChange={(d) => setBookingDate(d)}
+          bookingStartTime={bookingStartTime}
+          onStartTimeChange={(t) => setBookingStartTime(t)}
+          bookingDuration={bookingDuration}
+          onDurationChange={(dur) => setBookingDuration(dur)}
+          radius={nearbyRadius}
+          onRadiusChange={(r) => setNearbyRadius(r)}
+          onUpdate={() => setRefreshNonce((prev) => prev + 1)}
+          isSearching={isSearchingNearby}
+        />
 
-        {/* Discovery Hero */}
-        <section style={{ marginBottom: '2rem', textAlign: 'center', padding: '1.5rem 1rem' }}>
-          <span className="eyebrow">SMART INFRASTRUCTURE PARKING</span>
-          <h1 className="display-title" style={{ marginBottom: '0.75rem' }}>
-            Find your parking spot.
-          </h1>
-          <p style={{ maxWidth: '580px', margin: '0 auto 1.5rem', color: 'var(--ps-secondary-dark)' }}>
-            Real-time top-down parking space availability. Browse facilities, inspect live layout bays, and reserve your exact space before arrival.
-          </p>
-
-          {/* Search Box */}
-          <div style={{
-            maxWidth: '640px',
-            margin: '0 auto',
-            display: 'flex',
-            gap: '0.5rem',
-            backgroundColor: '#FFFFFF',
-            padding: '0.5rem',
-            borderRadius: 'var(--ps-radius-sm)',
-            border: '1px solid var(--ps-secondary-light)',
-            boxShadow: 'var(--ps-shadow-card)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', padding: '0 0.5rem', color: 'var(--ps-secondary-dark)' }}>
-              <Search size={20} />
-            </div>
-            <input
-              type="text"
-              placeholder="Search by facility name, city, or address..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              aria-label="Search parking facilities"
-              style={{
-                flex: 1,
-                border: 'none',
-                outline: 'none',
-                fontSize: '0.9375rem',
-                fontFamily: 'var(--ps-font-sans)',
-                color: 'var(--ps-primary-dark)'
-              }}
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ps-secondary-dark)', padding: '0 0.5rem' }}
-                aria-label="Clear search"
-              >
-                <X size={16} />
-              </button>
-            )}
-            <button className="btn btn-accent" onClick={() => setActiveView('search')}>
-              Find Parking
-            </button>
-          </div>
-
-          {/* Popular Destination Quick Pills */}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
-            {['Connaught Place', 'City Mall', 'Aerocity', 'Metro Central'].map((item) => (
-              <button
-                key={item}
-                onClick={() => { setSearchQuery(item); setActiveView('search'); }}
-                className="btn btn-secondary btn-sm"
-                style={{ fontSize: '0.75rem' }}
-              >
-                <MapPin size={12} /> {item}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* Filter Control Bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-          <div>
-            <h2 className="section-title">Parking Facilities</h2>
-            <p className="metadata">{filteredFacilities.length} locations available</p>
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button
-              className={`btn btn-sm ${selectedFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setSelectedFilter('ALL')}
-            >
-              All Facilities
-            </button>
-            <button
-              className={`btn btn-sm ${selectedFilter === 'OPEN' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setSelectedFilter('OPEN')}
-            >
-              Available Now
-            </button>
-            <button
-              className={`btn btn-sm ${selectedFilter === 'LOW_PRICE' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setSelectedFilter('LOW_PRICE')}
-            >
-              Under ₹50/hr
-            </button>
-          </div>
-        </div>
-
-        {/* Facilities List Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.25rem' }}>
-          {filteredFacilities.map((fac) => (
-            <div key={fac.id} className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                  <span className={`status-tag ${fac.availableSpots > 0 ? 'available' : 'occupied'}`}>
-                    {fac.availableSpots > 0 ? `${fac.availableSpots} SPOTS OPEN` : 'FACILITY FULL'}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8125rem', fontWeight: 600 }}>
-                    <Star size={14} fill="#F3F456" stroke="#B2A240" />
-                    <span>{fac.rating || 4.8}</span>
-                    <span className="metadata">({fac.reviewsCount || 120})</span>
-                  </div>
-                </div>
-
-                <h3 style={{ fontSize: '1.125rem', marginBottom: '0.35rem' }}>{fac.name}</h3>
-                <p className="metadata" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.75rem' }}>
-                  <MapPin size={14} /> {fac.address} · {fac.distance || fac.city}
+        {/* 2. MAIN COMPARISON LAYOUT (LEFT 56-60%, RIGHT 40-44%) */}
+        <div className="discovery-main">
+          {/* LEFT COLUMN: Results Header + Stacked Facility Cards */}
+          <div className="discovery-left-col">
+            {/* Results Header Strip */}
+            <div className="results-header-strip">
+              <div className="results-header-info">
+                <h2 className="results-main-heading">
+                  {nearbyFacilities.length} Parking {nearbyFacilities.length === 1 ? 'Facility' : 'Facilities'} near {destination?.name || 'Destination'}
+                </h2>
+                <p className="results-sub-heading">
+                  Ranked by walking proximity and real-time bay availability.
                 </p>
-
-                <div style={{ display: 'flex', gap: '1rem', padding: '0.75rem 0', borderTop: '1px solid var(--ps-secondary-light)', borderBottom: '1px solid var(--ps-secondary-light)', marginBottom: '1rem' }}>
-                  <div>
-                    <div className="metadata">Standard Rate</div>
-                    <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>₹{fac.hourlyRate}<span style={{ fontSize: '0.75rem', fontWeight: 400 }}>/hr</span></div>
-                  </div>
-                  <div style={{ borderLeft: '1px solid var(--ps-secondary-light)', paddingLeft: '1rem' }}>
-                    <div className="metadata">Operating Hours</div>
-                    <div style={{ fontWeight: 500, fontSize: '0.875rem' }}>{fac.openingHours || '24 Hours'}</div>
-                  </div>
-                </div>
               </div>
 
-              <button
-                className="btn btn-primary btn-block"
-                onClick={() => handleSelectFacility(fac)}
-              >
-                View Parking Map <ArrowRight size={16} />
-              </button>
+              {/* Sort Selector */}
+              <div className="results-sort-container">
+                <label htmlFor="facility-sort-select" className="sort-select-label">Sort:</label>
+                <select
+                  id="facility-sort-select"
+                  className="facility-sort-select"
+                  value={nearbySort}
+                  onChange={(e) => setNearbySort(e.target.value)}
+                  aria-label="Sort facilities"
+                >
+                  <option value="recommended">Recommended</option>
+                  <option value="nearest">Nearest</option>
+                  <option value="price">Price: Low to High</option>
+                  <option value="availability">Most Available</option>
+                </select>
+              </div>
             </div>
-          ))}
-        </div>
 
-        {/* Empty State */}
-        {filteredFacilities.length === 0 && (
-          <div className="card" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>No parking facilities match your search</h3>
-            <p className="metadata" style={{ marginBottom: '1rem' }}>Try clearing your search query or selecting a different filter.</p>
-            <button className="btn btn-secondary" onClick={() => { setSearchQuery(''); setSelectedFilter('ALL'); }}>
-              Reset Search & Filters
-            </button>
+            {/* Parking Type Quick Filter Chips */}
+            <div className="results-type-filter-bar">
+              {[
+                { id: 'ALL', label: 'All Spaces' },
+                { id: 'EV', label: '⚡ EV Charging' },
+                { id: 'ACCESSIBLE', label: '♿ Accessible' },
+                { id: 'STANDARD', label: '🅿️ Standard' }
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`type-filter-btn ${nearbyParkingType === t.id ? 'is-active' : ''}`}
+                  onClick={() => setNearbyParkingType(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Facilities Cards Stack or Empty State */}
+            {isSearchingNearby && nearbyFacilities.length === 0 ? (
+              <div className="discovery-skeleton-list">
+                {[1, 2, 3].map((n) => (
+                  <div key={n} className="facility-skeleton-card">
+                    <div className="skeleton-line title" />
+                    <div className="skeleton-line sub" />
+                    <div className="skeleton-line row" />
+                  </div>
+                ))}
+              </div>
+            ) : nearbyFacilities.length > 0 ? (
+              <div className="discovery-cards-stack">
+                {nearbyFacilities.map((fac, idx) => (
+                  <NearbyFacilityCard
+                    key={fac.id}
+                    facility={fac}
+                    isSelected={highlightedFacility && String(highlightedFacility.id) === String(fac.id)}
+                    isRecommended={idx === 0}
+                    onSelect={(f) => setHighlightedFacility(f)}
+                    onHover={(id) => setHoveredFacilityId(id)}
+                    onViewSpaces={handleSelectFacility}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="discovery-empty-state">
+                <div className="empty-icon-wrap">
+                  <MapPin size={24} />
+                </div>
+                <h3 className="empty-heading">No ParkSpot facilities found</h3>
+                <p className="empty-desc">
+                  No active locations found within {nearbyRadius} km of <strong>{destination?.name || 'this location'}</strong>. Try expanding your search radius.
+                </p>
+                <div className="empty-actions-row">
+                  {nearbyRadius < 5 && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => setNearbyRadius(5)}
+                    >
+                      Expand to 5 km
+                    </button>
+                  )}
+                  {nearbyRadius < 10 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setNearbyRadius(10)}
+                    >
+                      Expand to 10 km
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setDestination({
+                        lat: 23.0734,
+                        lng: 72.6266,
+                        name: 'Ahmedabad Airport',
+                        city: 'Ahmedabad',
+                        isCurrentLocation: false
+                      });
+                    }}
+                  >
+                    Search Ahmedabad Airport
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* RIGHT COLUMN: Map Header + Mapbox Map (320px) + Context Card + Notice */}
+          <div className="discovery-right-col">
+            {/* Map Header */}
+            <div className="map-context-header">
+              <div className="map-context-eyebrow">ITINERARY CONTEXT</div>
+              <div className="map-context-summary-row">
+                <div className="map-context-dest">
+                  <MapPin size={13} className="inline-icon" />
+                  <span>{destination?.name || 'Selected Destination'}</span>
+                </div>
+                <div className="map-context-badge">
+                  <span className="context-dot" />
+                  <span>{nearbyRadius} km radius · {nearbyFacilities.length} {nearbyFacilities.length === 1 ? 'facility' : 'facilities'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Mapbox Map (compact height ~320px) */}
+            <div className="driver-map-card">
+              <NearbyParkingMap
+                facilities={nearbyFacilities}
+                destination={destination}
+                selectedFacility={highlightedFacility}
+                hoveredFacilityId={hoveredFacilityId}
+                radius={nearbyRadius}
+                onSelectFacility={(fac) => setHighlightedFacility(fac)}
+                onViewSpaces={handleSelectFacility}
+              />
+            </div>
+
+            {/* Below-Map Context Card */}
+            <div className="driver-context-card">
+              <div className="context-card-top">
+                <span className="context-card-eyebrow">PARKING CONTEXT</span>
+                {currentContextFacility && (
+                  <span className="context-bay-pill">
+                    ● {currentContextFacility.availableSpots ?? 0} bays available
+                  </span>
+                )}
+              </div>
+              {currentContextFacility ? (
+                <div className="context-card-details">
+                  <h4 className="context-facility-heading">{currentContextFacility.name}</h4>
+                  <p className="context-facility-sub">
+                    {currentContextFacility.address}{currentContextFacility.city ? `, ${currentContextFacility.city}` : ''}
+                  </p>
+                  <div className="context-guidance-line">
+                    <span className="guidance-dot" />
+                    <span>
+                      Dedicated pedestrian and vehicular access toward {destination?.name || 'destination'}.
+                      {currentContextFacility.distanceFormatted ? ` Estimated ${currentContextFacility.distanceFormatted} away.` : ''}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="context-card-details">
+                  <h4 className="context-facility-heading">Search Area</h4>
+                  <p className="context-facility-sub">
+                    Displaying facilities within {nearbyRadius} km of {destination?.name || 'destination'}. Select any facility to review bay access.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Information Notice */}
+            <div className="driver-pricing-notice">
+              <p>Availability and pricing are confirmed during reservation.</p>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -831,6 +1124,50 @@ export function DriverExperience({
           </div>
         </div>
 
+        {/* Conflict Notice Alert */}
+        {conflictNotice && (
+          <div
+            role="alert"
+            style={{
+              backgroundColor: '#FEF2F2',
+              border: '1px solid #F87171',
+              borderRadius: 'var(--ps-radius-sm)',
+              padding: '1rem 1.25rem',
+              marginBottom: '1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '1rem'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <AlertTriangle size={22} color="#DC2626" style={{ flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, color: '#991B1B', fontSize: '0.9375rem' }}>
+                  {conflictNotice.title || 'This spot was just booked.'}
+                </div>
+                <div style={{ fontSize: '0.875rem', color: '#7F1D1D' }}>
+                  {conflictNotice.message || 'Please choose another available spot.'}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setConflictNotice(null)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: '#991B1B',
+                padding: '4px'
+              }}
+              aria-label="Dismiss notice"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
+
         {/* Content Layout: Interactive Map + Selection Sidebar */}
         <div className="content-grid content-grid-split">
           {/* Main Map Visualization Area */}
@@ -844,10 +1181,15 @@ export function DriverExperience({
                 onSelectFloor={(fl) => {
                   setActiveFloor(fl);
                   setSelectedSpot(null);
+                  setInspectedNonAvailSpot(null);
+                  setConflictNotice(null);
+                  refreshFacilitySpots();
                 }}
                 spots={currentFloorSpots}
                 selectedSpotId={selectedSpot?.id}
                 onSelectSpot={handleSpotClick}
+                currentUserId={activeUser?.id || activeUser?._id}
+                userBookings={bookings}
               />
             )}
           </div>
@@ -856,6 +1198,10 @@ export function DriverExperience({
           <div>
             {selectedSpot ? (
               <div className="card" style={{ position: 'sticky', top: '80px', border: '2px solid var(--ps-accent-light)' }}>
+                <div className="booking-flow-brand-header" style={{ marginBottom: '0.65rem' }}>
+                  <Logo variant="full" size="sm" theme="light" />
+                  <span className="booking-flow-step-tag">Bay Inspection</span>
+                </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <span className="status-tag selected">SPOT SELECTED</span>
                   <button
@@ -916,6 +1262,76 @@ export function DriverExperience({
                   Continue to Reservation <ArrowRight size={16} />
                 </button>
               </div>
+            ) : inspectedNonAvailSpot ? (
+              <div className="card" style={{ position: 'sticky', top: '80px', border: '1px solid var(--ps-secondary-light)' }}>
+                <div className="booking-flow-brand-header" style={{ marginBottom: '0.65rem' }}>
+                  <Logo variant="full" size="sm" theme="light" />
+                  <span className="booking-flow-step-tag">Bay Status</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <span className={`status-tag ${inspectedNonAvailSpot.status.toLowerCase()}`}>
+                    {inspectedNonAvailSpot.status === 'OCCUPIED' ? 'OCCUPIED BY VEHICLE' : inspectedNonAvailSpot.status === 'RESERVED' ? 'RESERVED BAY' : 'UNDER MAINTENANCE'}
+                  </span>
+                  <button
+                    onClick={() => setInspectedNonAvailSpot(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ps-secondary-dark)' }}
+                    aria-label="Close inspection"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div style={{
+                  backgroundColor: 'var(--ps-asphalt-ground)',
+                  borderRadius: 'var(--ps-radius-sm)',
+                  padding: '1.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '1.25rem',
+                  minHeight: '130px'
+                }}>
+                  {inspectedNonAvailSpot.status === 'OCCUPIED' ? (
+                    <VehicleTopDown color="#3E444E" status="OCCUPIED" width={48} height={82} />
+                  ) : inspectedNonAvailSpot.status === 'RESERVED' ? (
+                    <div style={{ textAlign: 'center', color: '#F3F456' }}>
+                      <div style={{ fontWeight: 800, fontSize: '0.875rem', letterSpacing: '0.05em' }}>RESERVED PASS</div>
+                      <div style={{ fontSize: '0.75rem', color: '#A3A398', marginTop: '4px' }}>Active driver booking assigned</div>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', color: '#A3A398' }}>
+                      <Wrench size={28} strokeWidth={1.5} style={{ margin: '0 auto 6px' }} />
+                      <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>ROUTINE MAINTENANCE</div>
+                    </div>
+                  )}
+                </div>
+
+                <h3 style={{ fontSize: '1.35rem', marginBottom: '0.25rem' }}>Space {inspectedNonAvailSpot.number}</h3>
+                <p className="metadata" style={{ marginBottom: '1rem' }}>
+                  {activeFloor} · {inspectedNonAvailSpot.type || 'Standard'} Bay
+                </p>
+
+                <div style={{
+                  backgroundColor: 'rgba(0,0,0,0.03)',
+                  padding: '0.85rem',
+                  borderRadius: 'var(--ps-radius-sm)',
+                  marginBottom: '1.25rem',
+                  fontSize: '0.85rem',
+                  color: 'var(--ps-secondary-dark)',
+                  lineHeight: '1.4'
+                }}>
+                  {inspectedNonAvailSpot.status === 'OCCUPIED' && 'This bay is currently occupied by a parked vehicle and cannot be reserved for this period.'}
+                  {inspectedNonAvailSpot.status === 'RESERVED' && 'This bay is currently reserved by another driver under an active reservation.'}
+                  {inspectedNonAvailSpot.status === 'MAINTENANCE' && 'This space is temporarily offline for inductive sensor maintenance.'}
+                </div>
+
+                <button
+                  className="btn btn-secondary btn-block"
+                  onClick={() => setInspectedNonAvailSpot(null)}
+                >
+                  Select an Available Bay
+                </button>
+              </div>
             ) : (
               <div className="card" style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
                 <Car size={36} strokeWidth={1.5} style={{ color: 'var(--ps-secondary-dark)', margin: '0 auto 0.75rem' }} />
@@ -955,7 +1371,10 @@ export function DriverExperience({
         </div>
 
         <div className="card">
-          <span className="eyebrow">STEP 1 OF 3</span>
+          <div className="booking-flow-brand-header">
+            <Logo variant="full" size="sm" theme="light" />
+            <span className="booking-flow-step-tag">Step 1 of 3 · Schedule</span>
+          </div>
           <h2 style={{ fontSize: '1.35rem', marginBottom: '0.35rem' }}>Select Date & Duration</h2>
           <p className="metadata" style={{ marginBottom: '1.5rem' }}>
             {selectedFacility.name} · {activeFloor}, Spot {selectedSpot.number}
@@ -1110,7 +1529,10 @@ export function DriverExperience({
         </div>
 
         <div className="card">
-          <span className="eyebrow">STEP 2 OF 3</span>
+          <div className="booking-flow-brand-header">
+            <Logo variant="full" size="sm" theme="light" />
+            <span className="booking-flow-step-tag">Step 2 of 3 · Verification</span>
+          </div>
           <h2 style={{ fontSize: '1.35rem', marginBottom: '1.25rem' }}>Review Booking Details</h2>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1.5rem' }}>
@@ -1165,6 +1587,57 @@ export function DriverExperience({
   // SCREEN 8: PAYMENT SCREEN
   // =========================================================================
   if (activeView === 'payment' && selectedFacility && selectedSpot) {
+    // If user is not authenticated, do not show payment form
+    if (!activeUser || !authStorage.getToken()) {
+      return (
+        <div className="container" style={{ maxWidth: '540px', padding: '3rem 1rem', textAlign: 'center' }}>
+          <div className="booking-flow-card" style={{ padding: '2.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem', color: '#B2A240' }}>
+              <Lock size={44} />
+            </div>
+            <h2 style={{ fontSize: '1.45rem', fontWeight: 800, marginBottom: '0.5rem', color: 'var(--ps-primary-dark)' }}>
+              Authentication Required
+            </h2>
+            <p style={{ color: 'var(--ps-secondary-dark)', marginBottom: '1.75rem', fontSize: '0.925rem', lineHeight: 1.55 }}>
+              Your session has expired or you are not signed in. Please sign in to continue your reservation for {selectedFacility.name}.
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setActiveView('review')}
+              >
+                Back to Review
+              </button>
+              <button
+                type="button"
+                className="btn btn-accent"
+                onClick={() => {
+                  window.location.href = '/login';
+                }}
+              >
+                Sign In to Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (showCoinAnimation) {
+      return (
+        <PaymentSuccessAnimation
+          amount={calculatedCost}
+          facilityName={selectedFacility.name}
+          spotNumber={selectedSpot.number}
+          onComplete={() => {
+            setShowCoinAnimation(false);
+            setActiveView('confirmed');
+          }}
+        />
+      );
+    }
+
     if (paymentState === 'PROCESSING') {
       return (
         <div className="container" style={{ maxWidth: '540px', padding: '2rem 1rem' }}>
@@ -1174,7 +1647,7 @@ export function DriverExperience({
     }
 
     return (
-      <div className="container" style={{ maxWidth: '540px' }}>
+      <div className="container" style={{ maxWidth: '560px' }}>
         {renderHoldExpiredModal()}
 
         <button className="btn btn-secondary btn-sm" onClick={() => setActiveView('review')} style={{ marginBottom: '1rem' }}>
@@ -1190,9 +1663,14 @@ export function DriverExperience({
         </div>
 
         <div className="card">
-          <span className="eyebrow">STEP 3 OF 3</span>
-          <h2 style={{ fontSize: '1.35rem', marginBottom: '0.5rem' }}>Select Payment Method</h2>
-          <p className="metadata" style={{ marginBottom: '1.5rem' }}>
+          {/* Booking Flow Brand Header */}
+          <div className="booking-flow-brand-header">
+            <Logo variant="full" size="sm" theme="light" />
+            <span className="booking-flow-step-tag">Step 3 of 3 · Checkout</span>
+          </div>
+
+          <h2 style={{ fontSize: '1.35rem', marginBottom: '0.35rem' }}>Select Payment Method</h2>
+          <p className="metadata" style={{ marginBottom: '1.25rem' }}>
             Pay ₹{calculatedCost} to complete reservation for {selectedFacility.name} (Spot {selectedSpot.number}).
           </p>
 
@@ -1211,8 +1689,19 @@ export function DriverExperience({
                 <AlertTriangle size={16} /> Payment Notice
               </div>
               <p>{paymentError}</p>
+              {paymentError.includes('sign in') && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  style={{ marginTop: '0.65rem' }}
+                  onClick={() => { window.location.href = '/login'; }}
+                >
+                  Sign In to Continue
+                </button>
+              )}
               {paymentState === 'CONFLICT' && (
                 <button
+                  type="button"
                   className="btn btn-secondary btn-sm"
                   style={{ marginTop: '0.5rem' }}
                   onClick={() => setActiveView('facility')}
@@ -1223,37 +1712,245 @@ export function DriverExperience({
             </div>
           )}
 
-          {/* Payment Options */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
-            {[
-              { id: 'UPI', label: 'UPI / Google Pay / PhonePe / QR', icon: <Smartphone size={18} /> },
-              { id: 'CARD', label: 'Credit or Debit Card', icon: <CreditCard size={18} /> },
-              { id: 'NETBANKING', label: 'Net Banking (All Indian Banks)', icon: <Building size={18} /> }
-            ].map((method) => (
-              <label
-                key={method.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  padding: '0.85rem',
-                  border: paymentMethod === method.id ? '2px solid var(--ps-primary-dark)' : '1px solid rgba(112, 115, 113, 0.3)',
-                  borderRadius: 'var(--ps-radius-sm)',
-                  backgroundColor: paymentMethod === method.id ? 'var(--ps-secondary-light)' : '#FFFFFF',
-                  cursor: 'pointer',
-                  transition: 'var(--ps-transition)'
-                }}
-              >
-                <input
-                  type="radio"
-                  name="payment"
-                  checked={paymentMethod === method.id}
-                  onChange={() => setPaymentMethod(method.id)}
-                />
-                {method.icon}
-                <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{method.label}</span>
-              </label>
-            ))}
+          {/* Payment Method Tabs */}
+          <div className="payment-tabs-strip">
+            <button
+              type="button"
+              className={`payment-tab-btn ${paymentMethod === 'UPI' ? 'active' : ''}`}
+              onClick={() => { setPaymentMethod('UPI'); setUpiError(''); }}
+            >
+              <Smartphone size={20} />
+              <span>UPI & QR</span>
+            </button>
+            <button
+              type="button"
+              className={`payment-tab-btn ${paymentMethod === 'CARD' ? 'active' : ''}`}
+              onClick={() => setPaymentMethod('CARD')}
+            >
+              <CreditCard size={20} />
+              <span>Debit / Credit</span>
+            </button>
+            <button
+              type="button"
+              className={`payment-tab-btn ${paymentMethod === 'NETBANKING' ? 'active' : ''}`}
+              onClick={() => setPaymentMethod('NETBANKING')}
+            >
+              <Building size={20} />
+              <span>Net Banking</span>
+            </button>
+          </div>
+
+          {/* Payment Method Details Panel */}
+          <div className="payment-method-panel">
+            {/* UPI Option */}
+            {paymentMethod === 'UPI' && (
+              <div>
+                <div className="upi-sub-switch">
+                  <button
+                    type="button"
+                    className={`upi-switch-btn ${upiMode === 'vpa' ? 'active' : ''}`}
+                    onClick={() => { setUpiMode('vpa'); setUpiError(''); }}
+                  >
+                    UPI ID / VPA
+                  </button>
+                  <button
+                    type="button"
+                    className={`upi-switch-btn ${upiMode === 'qr' ? 'active' : ''}`}
+                    onClick={() => setUpiMode('qr')}
+                  >
+                    Dynamic Order QR
+                  </button>
+                </div>
+
+                {upiMode === 'vpa' ? (
+                  <div>
+                    <label className="form-label" htmlFor="upi-vpa-input">Enter UPI ID</label>
+                    <input
+                      id="upi-vpa-input"
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. mobile@upi or username@okhdfcbank"
+                      value={upiId}
+                      onChange={(e) => {
+                        setUpiId(e.target.value);
+                        if (upiError) setUpiError('');
+                      }}
+                    />
+                    {upiError && (
+                      <span style={{ color: '#C62828', fontSize: '0.75rem', marginTop: '4px', display: 'block', fontWeight: 600 }}>
+                        {upiError}
+                      </span>
+                    )}
+
+                    <div className="vpa-chips-row">
+                      {['@okhdfcbank', '@okaxis', '@ybl', '@ibl', '@paytm', '@upi'].map((handle) => (
+                        <button
+                          key={handle}
+                          type="button"
+                          className="vpa-chip"
+                          onClick={() => {
+                            const prefix = upiId.includes('@') ? upiId.split('@')[0] : upiId || 'driver';
+                            setUpiId(`${prefix}${handle}`);
+                            setUpiError('');
+                          }}
+                        >
+                          {handle}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="dynamic-qr-box">
+                    <div className="qr-code-graphic">
+                      <div className="qr-matrix-sim">
+                        {Array.from({ length: 36 }).map((_, i) => (
+                          <div key={i} className={`qr-block ${(i % 3 === 0 || i % 5 === 0) ? '' : 'empty'}`} />
+                        ))}
+                      </div>
+                      <span style={{ fontSize: '0.625rem', fontWeight: 800, marginTop: '6px', color: '#B2A240' }}>
+                        ORD-{selectedSpot.number}-{calculatedCost}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--ps-primary-dark)' }}>
+                      Scan with Google Pay, PhonePe, Paytm, or BHIM
+                    </span>
+                    <span style={{ fontSize: '0.6875rem', color: '#707371', marginTop: '3px' }}>
+                      QR is unique to Order #{selectedSpot.number} · Valid for {formatTimer(holdSecondsLeft)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="payment-security-callout">
+                  <ShieldCheck size={16} style={{ color: '#10B981', flexShrink: 0, marginTop: '1px' }} />
+                  <span>
+                    <strong>Zero-Knowledge UPI:</strong> ParkSpot never asks for or stores your UPI PIN. Payment authorization takes place exclusively in your verified UPI app.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Card Option */}
+            {paymentMethod === 'CARD' && (
+              <div>
+                <div className="card-brands-row">
+                  <span className="card-brand-badge">VISA</span>
+                  <span className="card-brand-badge">Mastercard</span>
+                  <span className="card-brand-badge">RuPay</span>
+                  <span className="card-brand-badge">American Express</span>
+                </div>
+
+                <div className="card-mock-form">
+                  <div>
+                    <label className="form-label" htmlFor="card-name-input">Cardholder Name</label>
+                    <input
+                      id="card-name-input"
+                      type="text"
+                      className="form-input"
+                      value={cardHolder}
+                      onChange={(e) => setCardHolder(e.target.value)}
+                      placeholder="Name as printed on card"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="form-label" htmlFor="card-number-input">Card Number</label>
+                    <input
+                      id="card-number-input"
+                      type="text"
+                      className="form-input"
+                      value={cardNumber}
+                      onChange={(e) => setCardNumber(e.target.value)}
+                      placeholder="•••• •••• •••• ••••"
+                      style={{ fontFamily: 'var(--ps-font-mono)', letterSpacing: '0.08em' }}
+                    />
+                  </div>
+
+                  <div className="card-fields-split">
+                    <div>
+                      <label className="form-label" htmlFor="card-expiry-input">Expiry Date</label>
+                      <input
+                        id="card-expiry-input"
+                        type="text"
+                        className="form-input"
+                        value={cardExpiry}
+                        onChange={(e) => setCardExpiry(e.target.value)}
+                        placeholder="MM/YY"
+                        style={{ fontFamily: 'var(--ps-font-mono)' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label" htmlFor="card-cvv-input">CVV</label>
+                      <input
+                        id="card-cvv-input"
+                        type="password"
+                        className="form-input"
+                        maxLength={4}
+                        placeholder="•••"
+                        defaultValue="•••"
+                        style={{ fontFamily: 'var(--ps-font-mono)' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="payment-security-callout">
+                  <Lock size={16} style={{ color: '#10B981', flexShrink: 0, marginTop: '1px' }} />
+                  <span>
+                    <strong>PCI-DSS Certified:</strong> Card details are tokenized directly with the payment gateway. ParkSpot never receives or saves your CVV or card PIN.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Net Banking Option */}
+            {paymentMethod === 'NETBANKING' && (
+              <div>
+                <span className="form-label">Select Popular Indian Bank</span>
+                <div className="bank-grid-select">
+                  {[
+                    'HDFC Bank',
+                    'State Bank of India',
+                    'ICICI Bank',
+                    'Axis Bank',
+                    'Kotak Mahindra Bank',
+                    'Punjab National Bank',
+                    'Bank of Baroda',
+                    'Canara Bank'
+                  ].map((bank) => (
+                    <button
+                      key={bank}
+                      type="button"
+                      className={`bank-option-pill ${selectedBank === bank ? 'active' : ''}`}
+                      onClick={() => setSelectedBank(bank)}
+                    >
+                      <Building size={14} />
+                      <span>{bank}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <label className="form-label" htmlFor="other-banks-select">Or choose other supported bank</label>
+                <select
+                  id="other-banks-select"
+                  className="form-select"
+                  value={selectedBank}
+                  onChange={(e) => setSelectedBank(e.target.value)}
+                >
+                  <option value="Union Bank of India">Union Bank of India</option>
+                  <option value="IndusInd Bank">IndusInd Bank</option>
+                  <option value="IDFC FIRST Bank">IDFC FIRST Bank</option>
+                  <option value="Federal Bank">Federal Bank</option>
+                  <option value="Yes Bank">Yes Bank</option>
+                </select>
+
+                <div className="payment-security-callout">
+                  <ShieldCheck size={16} style={{ color: '#10B981', flexShrink: 0, marginTop: '1px' }} />
+                  <span>
+                    <strong>Bank-Grade Redirection:</strong> You will be securely redirected to {selectedBank}'s official Net Banking portal. ParkSpot never accesses your login passwords.
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Edge-case developer verification toggle */}
@@ -1271,7 +1968,7 @@ export function DriverExperience({
                 checked={simulateFailure}
                 onChange={(e) => setSimulateFailure(e.target.checked)}
               />
-              <span>Simulate Payment Gateway Failure (Verification rejection test)</span>
+              <span>Simulate Gateway Verification Failure (Rejection test)</span>
             </label>
           </div>
 
@@ -1322,8 +2019,21 @@ export function DriverExperience({
         {/* Digital Parking Pass */}
         {renderDigitalPass(confirmedBooking)}
 
+        {/* Download Receipt CTA */}
+        <div style={{ marginTop: '1.25rem' }}>
+          <button
+            type="button"
+            className="download-receipt-btn"
+            style={{ width: '100%', justifyContent: 'center', padding: '0.85rem', fontSize: '0.9375rem' }}
+            onClick={() => receiptService.downloadReceipt(confirmedBooking)}
+          >
+            <Download size={18} />
+            <span>Download Official Booking Receipt (PDF)</span>
+          </button>
+        </div>
+
         {/* CTAs */}
-        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
           <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setActiveView('home')}>
             Book Another Spot
           </button>
@@ -1429,6 +2139,14 @@ export function DriverExperience({
                     onClick={() => setActiveBookingDetail(b)}
                   >
                     <Ticket size={14} /> View Pass
+                  </button>
+
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={() => receiptService.downloadReceipt(b)}
+                    title="Download Tax Receipt"
+                  >
+                    <Download size={14} /> Receipt
                   </button>
 
                   {canCancel && (

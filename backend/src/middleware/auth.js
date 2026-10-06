@@ -9,6 +9,9 @@ function authenticate(req, _res, next) {
   }
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
+    if (!req.user.accountType) {
+      req.user.accountType = ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(req.user.role) ? 'OPERATOR' : 'DRIVER';
+    }
     req.organizationId = req.user.organizationId || null;
     return next();
   } catch (_error) {
@@ -18,8 +21,22 @@ function authenticate(req, _res, next) {
 
 function authorize(...roles) {
   return (req, _res, next) => {
-    if (!req.user || !roles.includes(req.user.role)) {
+    const userRole = req.user?.internalRole || req.user?.role;
+    if (!req.user || !roles.includes(userRole)) {
       return next(new AppError(403, 'FORBIDDEN', 'You do not have permission to perform this action.'));
+    }
+    return next();
+  };
+}
+
+function requireAccountType(requiredType) {
+  return (req, _res, next) => {
+    if (!req.user) {
+      return next(new AppError(401, 'AUTH_REQUIRED', 'Authentication is required.'));
+    }
+    const currentAccountType = req.user.accountType || (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(req.user.role) ? 'OPERATOR' : 'DRIVER');
+    if (currentAccountType !== requiredType.toUpperCase()) {
+      return next(new AppError(403, 'FORBIDDEN', `Access restricted to ${requiredType.toLowerCase()} accounts.`));
     }
     return next();
   };
@@ -41,4 +58,4 @@ function requireTenant(req, _res, next) {
   return next();
 }
 
-module.exports = { authenticate, authorize, requireTenant };
+module.exports = { authenticate, authorize, requireAccountType, requireTenant };

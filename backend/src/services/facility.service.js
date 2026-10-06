@@ -8,16 +8,21 @@ async function enrichLots(lots, window) {
   const lotIds = lots.map((lot) => lot._id);
   const slots = await ParkingSlot.find({ lotId: { $in: lotIds }, isActive: true }).lean();
 
-  const conflicts = window
-    ? await Booking.find({
-        slotId: { $in: slots.map((s) => s._id) },
-        status: 'CONFIRMED',
-        startTime: { $lt: window.end },
-        endTime: { $gt: window.start }
-      })
-        .select('slotId')
-        .lean()
-    : [];
+  const now = new Date();
+  const effectiveWindow = window || { start: now, end: new Date(now.getTime() + 2 * 3600000) };
+  const holdThreshold = new Date(Date.now() - 15 * 60 * 1000);
+
+  const conflicts = await Booking.find({
+    slotId: { $in: slots.map((s) => s._id) },
+    $or: [
+      { status: 'CONFIRMED' },
+      { status: 'PENDING_PAYMENT', createdAt: { $gt: holdThreshold } }
+    ],
+    startTime: { $lt: effectiveWindow.end },
+    endTime: { $gt: effectiveWindow.start }
+  })
+    .select('slotId')
+    .lean();
 
   const unavailable = new Set(conflicts.map((b) => String(b.slotId)));
 
@@ -27,7 +32,7 @@ async function enrichLots(lots, window) {
       ...lot,
       id: String(lot._id),
       totalSlots: lotSlots.length,
-      availableSlots: lotSlots.filter((slot) => !unavailable.has(String(slot._id))).length,
+      availableSlots: lotSlots.filter((slot) => slot.status === 'AVAILABLE' && !unavailable.has(String(slot._id))).length,
       slots: undefined
     };
   });
@@ -53,29 +58,56 @@ async function getPublicFacilityById(id, window) {
 
   const slots = await ParkingSlot.find({ lotId: lot._id, isActive: true }).sort({ number: 1 }).lean();
 
-  const conflicts = window
-    ? await Booking.find({
-        slotId: { $in: slots.map((slot) => slot._id) },
-        status: 'CONFIRMED',
-        startTime: { $lt: window.end },
-        endTime: { $gt: window.start }
-      })
-        .select('slotId')
-        .lean()
-    : [];
+  const now = new Date();
+  const effectiveWindow = window || { start: now, end: new Date(now.getTime() + 2 * 3600000) };
+  const holdThreshold = new Date(Date.now() - 15 * 60 * 1000);
 
-  const unavailable = new Set(conflicts.map((booking) => String(booking.slotId)));
+  const activeBookings = await Booking.find({
+    slotId: { $in: slots.map((slot) => slot._id) },
+    $or: [
+      { status: 'CONFIRMED' },
+      { status: 'PENDING_PAYMENT', createdAt: { $gt: holdThreshold } }
+    ],
+    startTime: { $lt: effectiveWindow.end },
+    endTime: { $gt: effectiveWindow.start }
+  })
+    .select('slotId userId startTime endTime status')
+    .lean();
+
+  const bookedMap = new Map();
+  for (const b of activeBookings) {
+    bookedMap.set(String(b.slotId), b);
+  }
+
   const enriched = (await enrichLots([lot], window))[0];
 
-  enriched.slots = slots.map((slot) => ({
-    id: String(slot._id),
-    number: slot.number,
-    level: slot.level,
-    type: slot.type,
-    status: slot.status,
-    coordinates: slot.coordinates,
-    available: !unavailable.has(String(slot._id)) && slot.status !== 'MAINTENANCE' && slot.status !== 'BLOCKED'
-  }));
+  enriched.slots = slots.map((slot) => {
+    const activeBooking = bookedMap.get(String(slot._id));
+    const isBooked = Boolean(activeBooking);
+    let derivedStatus = slot.status;
+    if (isBooked && (derivedStatus === 'AVAILABLE' || !derivedStatus)) {
+      derivedStatus = 'RESERVED';
+    }
+    const isAvailable = !isBooked && slot.status === 'AVAILABLE';
+
+    return {
+      id: String(slot._id),
+      number: slot.number,
+      level: slot.level,
+      type: slot.type,
+      status: derivedStatus,
+      coordinates: slot.coordinates,
+      available: isAvailable,
+      bookingInfo: activeBooking
+        ? {
+            userId: String(activeBooking.userId),
+            status: activeBooking.status,
+            startTime: activeBooking.startTime,
+            endTime: activeBooking.endTime
+          }
+        : null
+    };
+  });
 
   return enriched;
 }

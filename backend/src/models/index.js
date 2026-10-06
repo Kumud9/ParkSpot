@@ -12,14 +12,25 @@ const organizationSchema = new Schema({
   status: { type: String, enum: ['ACTIVE', 'SUSPENDED'], default: 'ACTIVE', index: true }
 }, { timestamps: true });
 
-// 2. User Model (B2B Roles + Customer Role)
+// 2. User Model (Public Account Type + Internal B2B RBAC)
 const userSchema = new Schema({
   name: { type: String, required: true, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   passwordHash: { type: String, required: true },
+  accountType: {
+    type: String,
+    enum: ['DRIVER', 'OPERATOR'],
+    index: true
+  },
+  internalRole: {
+    type: String,
+    enum: ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR', null],
+    default: null,
+    index: true
+  },
   role: {
     type: String,
-    enum: ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR', 'USER'],
+    enum: ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR', 'USER', 'DRIVER'],
     default: 'USER',
     index: true
   },
@@ -31,6 +42,24 @@ const userSchema = new Schema({
   },
   status: { type: String, enum: ['ACTIVE', 'SUSPENDED'], default: 'ACTIVE' }
 }, { timestamps: true });
+
+userSchema.pre('save', function(next) {
+  if (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(this.role)) {
+    this.accountType = 'OPERATOR';
+    this.internalRole = this.internalRole || this.role;
+  } else if (this.accountType === 'OPERATOR') {
+    if (!this.internalRole) {
+      this.internalRole = ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(this.role) ? this.role : 'OWNER';
+    }
+    this.role = this.internalRole;
+  } else {
+    this.accountType = 'DRIVER';
+    this.internalRole = null;
+    this.organizationId = null;
+    this.role = 'USER';
+  }
+  next();
+});
 
 // 3. Facility / ParkingLot Model
 const facilitySchema = new Schema({
@@ -48,8 +77,34 @@ const facilitySchema = new Schema({
   dailyRate: { type: Number, required: true, min: 0 },
   openingTime: { type: String, default: '00:00' },
   closingTime: { type: String, default: '23:59' },
-  active: { type: Boolean, default: true, index: true }
+  active: { type: Boolean, default: true, index: true },
+  latitude: { type: Number, default: null, index: true },
+  longitude: { type: Number, default: null, index: true },
+  location: {
+    type: {
+      type: String,
+      enum: ['Point']
+    },
+    coordinates: {
+      type: [Number]
+    }
+  }
 }, { timestamps: true, collection: 'parkinglots' });
+
+facilitySchema.pre('save', function(next) {
+  if (typeof this.latitude === 'number' && typeof this.longitude === 'number') {
+    this.location = {
+      type: 'Point',
+      coordinates: [this.longitude, this.latitude]
+    };
+  } else {
+    this.location = undefined;
+  }
+  next();
+});
+
+facilitySchema.index({ location: '2dsphere' }, { sparse: true });
+facilitySchema.index({ latitude: 1, longitude: 1 });
 
 // 4. Floor Model
 const floorSchema = new Schema({
@@ -233,7 +288,8 @@ const auditLogSchema = new Schema({
       'PRICING_RULE_APPLIED',
       'FORECAST_GENERATED',
       'AI_INSIGHT_REQUESTED',
-      'AI_RECOMMENDATION_EXPLAINED'
+      'AI_RECOMMENDATION_EXPLAINED',
+      'COPILOT_CHAT_QUERY'
     ],
     required: true,
     index: true

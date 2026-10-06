@@ -1,0 +1,282 @@
+/* =========================================================================
+   PARKSPOT — AUTHENTICATION PORTAL & LOGIN CSS
+   Palette:
+     Primary Light:    #F4F2E7
+     Primary Dark:     #25221B
+     Secondary Light:  #E6DFD1
+     Secondary Dark:   #707371
+     Accent Light:     #F3F456
+     Accent Dark:      #B2A240
+   ========================================================================= */
+
+.role-selection-wrapper {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1.5rem, 4vw, 3rem) 1.25rem;
+  background-color: var(--ps-primary-light, #F4F2E7);
+  box-sizing: border-box;
+}
+
+.role-selection-card {
+  width: 100%;
+  max-width: 540px;
+  background-color: #FFFFFF;
+  border-radius: 24px;
+  padding: clamp(2rem, 5vw, 2.75rem);
+  box-shadow: 0 16px 40px rgba(37, 34, 27, 0.08);
+  border: 1px solid var(--ps-secondary-light, #E6DFD1);
+  text-align: center;
+  box-sizing: border-box;
+  margin: 0 auto;
+  animation: authCardFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes authCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.portal-header-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background-color: var(--ps-accent-light, #F3F456);
+  color: var(--ps-primary-dark, #25221B);
+  padding: 4px 10px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--ps-accent-dark, #B2A240);
+}
+
+.portal-back-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ps-secondary-dark, #707371);
+  padding: 4px 0;
+  transition: color 0.15s ease;
+}
+
+.portal-back-btn:hover {
+  color: var(--ps-primary-dark, #25221B);
+}
+
+.portal-title {
+  font-size: 1.65rem;
+  font-weight: 800;
+  color: var(--ps-primary-dark, #25221B);
+  margin-top: 0.5rem;
+  margin-bottom: 0.35rem;
+  letter-spacing: -0.02em;
+}
+
+.portal-subtitle {
+  font-size: 0.925rem;
+  color: var(--ps-secondary-dark, #707371);
+  margin-bottom: 1.75rem;
+  line-height: 1.45;
+}
+
+.portal-options-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.25rem;
+  margin-bottom: 1.75rem;
+  text-align: left;
+}
+
+.portal-option-box {
+  background-color: #FAF8F2;
+  border: 1.5px solid var(--ps-secondary-light, #E6DFD1);
+  border-radius: 18px;
+  padding: 1.5rem 1.25rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.portal-option-box:hover {
+  border-color: var(--ps-accent-dark, #B2A240);
+  background-color: #FFFFFF;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(37, 34, 27, 0.08);
+}
+
+.portal-option-box:focus-visible {
+  border-color: var(--ps-accent-dark, #B2A240);
+  box-shadow: 0 0 0 3px rgba(243, 244, 86, 0.45);
+}
+
+.portal-option-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background-color: var(--ps-primary-dark, #25221B);
+  color: var(--ps-accent-light, #F3F456);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+  transition: transform 0.2s ease;
+}
+
+.portal-option-box:hover .portal-option-icon {
+  transform: scale(1.06);
+}
+
+.portal-option-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--ps-primary-dark, #25221B);
+  margin-bottom: 0.35rem;
+}
+
+.portal-option-desc {
+  font-size: 0.825rem;
+  color: var(--ps-secondary-dark, #707371);
+  line-height: 1.45;
+  margin-bottom: 1.25rem;
+  flex-grow: 1;
+}
+
+.portal-option-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ps-primary-dark, #25221B);
+  transition: gap 0.2s ease;
+}
+
+.portal-option-box:hover .portal-option-action {
+  gap: 0.55rem;
+  color: #000000;
+}
+
+/* Auth Form Fields */
+.auth-input-group {
+  margin-bottom: 1.15rem;
+  text-align: left;
+}
+
+.auth-input-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ps-primary-dark, #25221B);
+  margin-bottom: 0.4rem;
+}
+
+.auth-text-input {
+  width: 100%;
+  padding: 0.75rem 0.95rem;
+  border-radius: 8px;
+  border: 1.5px solid var(--ps-secondary-light, #E6DFD1);
+  background-color: #FAF8F2;
+  color: var(--ps-primary-dark, #25221B);
+  font-size: 0.9rem;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.auth-text-input:focus {
+  border-color: var(--ps-accent-dark, #B2A240);
+  background-color: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(243, 244, 86, 0.25);
+}
+
+.auth-submit-btn {
+  width: 100%;
+  padding: 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  background-color: var(--ps-accent-light, #F3F456);
+  color: var(--ps-primary-dark, #25221B);
+  border: 1px solid var(--ps-accent-dark, #B2A240);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.15s ease;
+  margin-top: 0.5rem;
+}
+
+.auth-submit-btn:hover:not(:disabled) {
+  background-color: #E8E940;
+  transform: translateY(-1px);
+}
+
+.auth-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.auth-error-banner {
+  background-color: #FDE8E8;
+  color: #9B1C1C;
+  border: 1px solid #F87171;
+  border-radius: 8px;
+  padding: 0.75rem 0.95rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.8125rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+}
+
+.auth-return-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ps-secondary-dark, #707371);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--ps-secondary-light, #E6DFD1);
+  background-color: #FAF8F2;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.auth-return-btn:hover {
+  background-color: #FFFFFF;
+  color: var(--ps-primary-dark, #25221B);
+  border-color: var(--ps-secondary-dark, #707371);
+}
+
+@media (max-width: 600px) {
+  .portal-options-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .role-selection-card {
+    padding: 1.75rem 1.25rem;
+    border-radius: 20px;
+  }
+}

@@ -3,6 +3,7 @@ import { ParkingMap } from './ParkingMap';
 import { api } from '../services/api';
 import { Logo } from './shared/Logo';
 import { ComponentLoader, ActionLoader } from './shared/Loading';
+import { ParkSpotCopilot } from './operator/ParkSpotCopilot';
 import {
   LayoutDashboard,
   Layers,
@@ -38,7 +39,8 @@ import {
   Send,
   Info,
   Calendar,
-  MapPin
+  MapPin,
+  Plus
 } from 'lucide-react';
 
 // Functional semantic state colors (as strictly required for parking states)
@@ -57,16 +59,24 @@ export function OperatorExperience({
   auditLogs = [],
   bookings = [],
   onUpdateSpotStatus,
+  onAddSpot,
   isLiveConnected = false,
-  activeUser = null
+  activeUser = null,
+  activeTab = null,
+  onTabChange = null
 }) {
   // -------------------------------------------------------------------------
   // CORE OPERATIONAL STATE
   // -------------------------------------------------------------------------
   const [selectedFacility, setSelectedFacility] = useState(() => facilities[0] || null);
   const [activeFloor, setActiveFloor] = useState('Floor 1');
-  const [operatorTab, setOperatorTab] = useState('dashboard');
-  const [activeRole, setActiveRole] = useState('ADMIN'); // OWNER | ADMIN | MANAGER | OPERATOR
+  const [internalTab, setInternalTab] = useState('dashboard');
+  const operatorTab = activeTab !== null && activeTab !== undefined ? activeTab : internalTab;
+  const setOperatorTab = (tab) => {
+    setInternalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+  const activeRole = activeUser?.internalRole || (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(activeUser?.role) ? activeUser.role : 'OPERATOR');
 
   // Update selected facility when facilities list changes
   useEffect(() => {
@@ -157,6 +167,56 @@ export function OperatorExperience({
           message: `Bay ${selectedSpotForAction.number} status updated to ${newStatus} (Demo Mode).`
         });
       }, 300);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // PARKING SPOTS REGISTRY & MODAL STATE
+  // -------------------------------------------------------------------------
+  const [isAddSpotModalOpen, setIsAddSpotModalOpen] = useState(false);
+  const [newSpotFacilityId, setNewSpotFacilityId] = useState('');
+  const [newSpotFloor, setNewSpotFloor] = useState('Floor 1');
+  const [newSpotNumber, setNewSpotNumber] = useState('');
+  const [newSpotType, setNewSpotType] = useState('STANDARD');
+  const [newSpotStatus, setNewSpotStatus] = useState('AVAILABLE');
+  const [addSpotLoading, setAddSpotLoading] = useState(false);
+  const [addSpotError, setAddSpotError] = useState(null);
+
+  const handleCreateSpotSubmit = async (e) => {
+    e.preventDefault();
+    if (!newSpotNumber.trim()) {
+      setAddSpotError('Please provide a valid Spot ID/number.');
+      return;
+    }
+    setAddSpotLoading(true);
+    setAddSpotError(null);
+
+    const targetFacId = newSpotFacilityId || selectedFacility?.id;
+    const spotPayload = {
+      facilityId: targetFacId,
+      number: newSpotNumber.trim().toUpperCase(),
+      level: newSpotFloor,
+      floor: newSpotFloor,
+      type: newSpotType,
+      status: newSpotStatus
+    };
+
+    try {
+      if (onAddSpot) {
+        await onAddSpot(targetFacId, spotPayload);
+      } else if (isLiveConnected && /^[a-f\d]{24}$/i.test(targetFacId)) {
+        await api.createSpot(targetFacId, spotPayload);
+      }
+      setIsAddSpotModalOpen(false);
+      setNewSpotNumber('');
+      setSpotFeedback({
+        type: 'success',
+        message: `Spot ${spotPayload.number} created successfully on ${newSpotFloor}.`
+      });
+    } catch (err) {
+      setAddSpotError(err.message || 'Failed to create parking spot.');
+    } finally {
+      setAddSpotLoading(false);
     }
   };
 
@@ -311,6 +371,45 @@ export function OperatorExperience({
     if (overstayFilter === 'ALL') return overstays;
     return overstays.filter((o) => o.status === overstayFilter);
   }, [overstays, overstayFilter]);
+
+  // Compute attention items for the ATTENTION section
+  const attentionItems = useMemo(() => {
+    const items = [];
+    const activeOverstayCount = (overstays || []).filter((o) => o.status === 'ACTIVE_OVERSTAY').length;
+    if (activeOverstayCount > 0) {
+      items.push({
+        id: 'att-overstays',
+        label: `${activeOverstayCount} Overstay${activeOverstayCount > 1 ? 's' : ''} detected`,
+        type: 'warning',
+        actionTab: 'overstays',
+        desc: `${activeOverstayCount} vehicles exceeding their paid reservation window.`
+      });
+    }
+
+    const pendingRecsCount = (recommendations || []).filter((r) => r.status === 'PENDING').length;
+    if (pendingRecsCount > 0) {
+      items.push({
+        id: 'att-recs',
+        label: `${pendingRecsCount} Pending Recommendation${pendingRecsCount > 1 ? 's' : ''}`,
+        type: 'alert',
+        actionTab: 'recommendations',
+        desc: 'ML pricing or allocation recommendations awaiting operator sign-off.'
+      });
+    }
+
+    if (occupancyPercent >= 85) {
+      items.push({
+        id: 'att-occupancy',
+        label: `High Occupancy Pressure (${occupancyPercent}%)`,
+        type: 'alert',
+        actionTab: 'spots',
+        desc: `Facility capacity is at ${occupancyPercent}%. Consider opening overflow bays.`
+      });
+    }
+
+    return items;
+  }, [overstays, recommendations, occupancyPercent]);
+
 
   // -------------------------------------------------------------------------
   // ML DEMAND FORECAST STATE
@@ -586,46 +685,167 @@ export function OperatorExperience({
     });
   }, [bookings, bookingFilter, bookingSearch]);
 
+  const operatorGreetingName = activeUser?.name?.split(' ')[0] || 'Operator';
+
   return (
-    <div className="container" style={{ maxWidth: '1440px' }}>
-      {/* =====================================================================
-          TOP HEADER: FACILITY CONTEXT, ROLE BADGE & CONNECTION
-          ===================================================================== */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        borderBottom: '1px solid var(--ps-secondary-light)',
-        paddingBottom: '0.85rem',
-        marginBottom: '1.25rem',
-        flexWrap: 'wrap',
-        gap: '0.85rem'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+    <div className="operator-layout-container">
+      {/* 1. SIDEBAR: Structured Mobility Hierarchy */}
+      <aside className="operator-sidebar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', padding: '0 0.75rem 1.5rem', borderBottom: '1px solid var(--ps-secondary-light)', marginBottom: '1.25rem' }}>
           <Logo variant="mark" size={26} />
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <h1 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>
-                ParkSpot B2B Operations Console
-              </h1>
-              <span className={`status-tag ${isLiveConnected ? 'available' : 'selected'}`} style={{ fontSize: '0.6875rem' }}>
-                {isLiveConnected ? '● Live API Connected' : '● Demo Simulation'}
-              </span>
-            </div>
-            <div className="metadata" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '2px' }}>
-              <Building2 size={13} />
-              <span>Tenant: <strong>Metro Infrastructure Operations Ltd</strong></span>
-            </div>
+            <div style={{ fontWeight: 800, fontSize: '0.9375rem', color: 'var(--ps-primary-dark)' }}>ParkSpot</div>
+            <div className="metadata" style={{ fontSize: '0.6875rem' }}>Operations Console</div>
           </div>
         </div>
 
-        {/* Facility Selector & RBAC Role Switcher */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span className="metadata">Facility:</span>
+        {/* SECTION 1: OPERATIONS */}
+        <div className="operator-sidebar-group">
+          <div className="operator-sidebar-group-title">Operations</div>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('dashboard')}
+          >
+            <div className="operator-sidebar-item-left">
+              <LayoutDashboard size={16} />
+              <span>Overview</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'map' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('map')}
+          >
+            <div className="operator-sidebar-item-left">
+              <MapIcon size={16} />
+              <span>Live Parking</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'bookings' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('bookings')}
+          >
+            <div className="operator-sidebar-item-left">
+              <CalendarCheck size={16} />
+              <span>Bookings</span>
+            </div>
+            <span className="operator-sidebar-badge">{bookings.length}</span>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'spots' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('spots')}
+          >
+            <div className="operator-sidebar-item-left">
+              <SlidersHorizontal size={16} />
+              <span>Parking Spots</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'occupancy' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('occupancy')}
+          >
+            <div className="operator-sidebar-item-left">
+              <Layers size={16} />
+              <span>Facilities</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'events' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('events')}
+          >
+            <div className="operator-sidebar-item-left">
+              <Activity size={16} />
+              <span>Events</span>
+            </div>
+          </button>
+        </div>
+
+        {/* SECTION 2: INTELLIGENCE */}
+        <div className="operator-sidebar-group">
+          <div className="operator-sidebar-group-title">Intelligence</div>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'analytics' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('analytics')}
+          >
+            <div className="operator-sidebar-item-left">
+              <BarChart3 size={16} />
+              <span>Analytics</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'forecast' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('forecast')}
+          >
+            <div className="operator-sidebar-item-left">
+              <TrendingUp size={16} />
+              <span>Forecast</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'recommendations' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('recommendations')}
+          >
+            <div className="operator-sidebar-item-left">
+              <BrainCircuit size={16} />
+              <span>Optimization</span>
+            </div>
+            {recommendations.filter((r) => r.status === 'PENDING').length > 0 && (
+              <span className="operator-sidebar-badge" style={{ backgroundColor: 'var(--ps-accent-dark)', color: '#FFFFFF' }}>
+                {recommendations.filter((r) => r.status === 'PENDING').length}
+              </span>
+            )}
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'pricing' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('pricing')}
+          >
+            <div className="operator-sidebar-item-left">
+              <DollarSign size={16} />
+              <span>Pricing</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'assistant' || operatorTab === 'copilot' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('copilot')}
+          >
+            <div className="operator-sidebar-item-left">
+              <Sparkles size={16} />
+              <span>ParkSpot Copilot</span>
+            </div>
+          </button>
+        </div>
+
+        {/* SECTION 3: ADMINISTRATION */}
+        <div className="operator-sidebar-group" style={{ marginTop: 'auto', marginBottom: 0 }}>
+          <div className="operator-sidebar-group-title">Administration</div>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'audit' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('audit')}
+          >
+            <div className="operator-sidebar-item-left">
+              <FileText size={16} />
+              <span>Audit Logs</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('settings')}
+          >
+            <div className="operator-sidebar-item-left">
+              <Settings size={16} />
+              <span>Settings</span>
+            </div>
+          </button>
+        </div>
+      </aside>
+
+      {/* 2. MAIN CANVAS */}
+      <div className="operator-main-canvas">
+        {/* DASHBOARD HEADER */}
+        <header className="operator-header">
+          <div className="operator-header-left">
+            <span className="operator-greeting">Good morning, {operatorGreetingName}</span>
             <select
-              className="form-select"
-              style={{ padding: '0.35rem 0.6rem', fontSize: '0.8125rem' }}
+              className="operator-facility-select"
               value={selectedFacility?.id || ''}
               onChange={(e) => {
                 const f = facilities.find((fac) => fac.id === e.target.value);
@@ -638,114 +858,72 @@ export function OperatorExperience({
             </select>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span className="metadata">Active Role:</span>
-            <select
-              className="form-select"
-              style={{ padding: '0.35rem 0.6rem', fontSize: '0.8125rem', fontWeight: 600 }}
-              value={activeRole}
-              onChange={(e) => setActiveRole(e.target.value)}
-              title="Switch role to test frontend RBAC visibility and permission enforcement"
-            >
-              <option value="OWNER">OWNER (Full Governance)</option>
-              <option value="ADMIN">ADMIN (Tenant Control)</option>
-              <option value="MANAGER">MANAGER (Operations & Rules)</option>
-              <option value="OPERATOR">OPERATOR (Day-to-day Floor)</option>
-            </select>
+          <div className="operator-header-right">
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--ps-primary-dark)' }}>
+                {activeUser?.name || 'Operator'}
+              </div>
+              <div style={{ fontSize: '0.6875rem', color: 'var(--ps-secondary-dark)' }}>
+                {activeRole} · {activeUser?.organizationName || 'Operations'}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </header>
 
-      {/* =====================================================================
-          NAVIGATION TABS (14 CORE SCOPES)
-          ===================================================================== */}
-      <div style={{
-        display: 'flex',
-        gap: '0.35rem',
-        overflowX: 'auto',
-        paddingBottom: '0.5rem',
-        marginBottom: '1.5rem',
-        borderBottom: '1px solid var(--ps-secondary-light)'
-      }}>
-        {[
-          { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={14} /> },
-          { id: 'occupancy', label: 'Live Occupancy', icon: <Layers size={14} /> },
-          { id: 'map', label: 'Interactive Map', icon: <MapIcon size={14} /> },
-          { id: 'spots', label: 'Spot Registry', icon: <SlidersHorizontal size={14} /> },
-          { id: 'bookings', label: 'Bookings', icon: <CalendarCheck size={14} /> },
-          { id: 'events', label: 'Operational Events', icon: <Activity size={14} /> },
-          { id: 'overstays', label: `Overstays (${overstays.length})`, icon: <AlertTriangle size={14} /> },
-          { id: 'analytics', label: 'Analytics', icon: <BarChart3 size={14} /> },
-          { id: 'recommendations', label: `Recommendations (${recommendations.filter(r => r.status === 'PENDING').length})`, icon: <BrainCircuit size={14} /> },
-          { id: 'pricing', label: 'Dynamic Pricing', icon: <DollarSign size={14} /> },
-          { id: 'forecast', label: 'ML Forecast', icon: <TrendingUp size={14} /> },
-          { id: 'assistant', label: 'AI Assistant', icon: <Bot size={14} /> },
-          { id: 'audit', label: 'Audit Logs', icon: <FileText size={14} /> },
-          { id: 'settings', label: 'Settings & RBAC', icon: <Settings size={14} /> }
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            className={`btn btn-sm ${operatorTab === tab.id ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-            onClick={() => setOperatorTab(tab.id)}
-          >
-            {tab.icon} {tab.label}
-          </button>
-        ))}
-      </div>
+        {/* CONTENT AREA */}
+        <div className="operator-content-area">
+          {/* Global Action Feedback Banners */}
+          {spotFeedback && (
+            <div style={{
+              backgroundColor: spotFeedback.type === 'error' ? '#FDE8E8' : 'rgba(46, 125, 50, 0.1)',
+              color: spotFeedback.type === 'error' ? '#9B1C1C' : '#2E7D32',
+              border: `1px solid ${spotFeedback.type === 'error' ? '#F87171' : '#2E7D32'}`,
+              borderRadius: 'var(--ps-radius-sm)',
+              padding: '0.65rem 0.95rem',
+              marginBottom: '1.25rem',
+              fontSize: '0.875rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {spotFeedback.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+                <span>{spotFeedback.message}</span>
+              </div>
+              <button
+                onClick={() => setSpotFeedback(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          )}
 
-      {/* Global Action Feedback Banners */}
-      {spotFeedback && (
-        <div style={{
-          backgroundColor: spotFeedback.type === 'error' ? '#FDE8E8' : 'rgba(46, 125, 50, 0.1)',
-          color: spotFeedback.type === 'error' ? '#9B1C1C' : '#2E7D32',
-          border: `1px solid ${spotFeedback.type === 'error' ? '#F87171' : '#2E7D32'}`,
-          borderRadius: 'var(--ps-radius-sm)',
-          padding: '0.65rem 0.95rem',
-          marginBottom: '1rem',
-          fontSize: '0.875rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            {spotFeedback.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
-            <span>{spotFeedback.message}</span>
-          </div>
-          <button
-            onClick={() => setSpotFeedback(null)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
-          >
-            <X size={15} />
-          </button>
-        </div>
-      )}
-
-      {recsFeedback && (
-        <div style={{
-          backgroundColor: recsFeedback.type === 'error' ? '#FDE8E8' : 'rgba(46, 125, 50, 0.1)',
-          color: recsFeedback.type === 'error' ? '#9B1C1C' : '#2E7D32',
-          border: `1px solid ${recsFeedback.type === 'error' ? '#F87171' : '#2E7D32'}`,
-          borderRadius: 'var(--ps-radius-sm)',
-          padding: '0.65rem 0.95rem',
-          marginBottom: '1rem',
-          fontSize: '0.875rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            {recsFeedback.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
-            <span>{recsFeedback.message}</span>
-          </div>
-          <button
-            onClick={() => setRecsFeedback(null)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
-          >
-            <X size={15} />
-          </button>
-        </div>
-      )}
+          {recsFeedback && (
+            <div style={{
+              backgroundColor: recsFeedback.type === 'error' ? '#FDE8E8' : 'rgba(46, 125, 50, 0.1)',
+              color: recsFeedback.type === 'error' ? '#9B1C1C' : '#2E7D32',
+              border: `1px solid ${recsFeedback.type === 'error' ? '#F87171' : '#2E7D32'}`,
+              borderRadius: 'var(--ps-radius-sm)',
+              padding: '0.65rem 0.95rem',
+              marginBottom: '1.25rem',
+              fontSize: '0.875rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {recsFeedback.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+                <span>{recsFeedback.message}</span>
+              </div>
+              <button
+                onClick={() => setRecsFeedback(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          )}
 
       {/* =====================================================================
           TAB 1: OPERATOR DASHBOARD (STRICT UX HIERARCHY)
@@ -758,163 +936,103 @@ export function OperatorExperience({
           ===================================================================== */}
       {operatorTab === 'dashboard' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          {/* 1. ATTENTION HIERARCHY */}
-          <section>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.75rem' }}>
-              <AlertCircle size={18} color="var(--ps-state-occupied)" />
-              <h2 className="section-title" style={{ fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                1. What Requires Attention Right Now
-              </h2>
+          {/* 1. ATTENTION SECTION */}
+          <div className="operator-attention-container">
+            {attentionItems.length === 0 ? (
+              <div className="operator-attention-banner clear">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <CheckCircle2 size={18} color="var(--ps-state-available)" />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: 'var(--ps-primary-dark)' }}>
+                      Everything looks good.
+                    </div>
+                    <div className="metadata" style={{ fontSize: '0.8125rem' }}>
+                      All {facilityFloors.length} levels operating nominally. No active overstays or pending operational alerts.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="operator-attention-banner alert">
+                <div className="operator-attention-title">ATTENTION REQUIRED</div>
+                <div className="operator-attention-items-row">
+                  {attentionItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="operator-attention-item"
+                      onClick={() => setOperatorTab(item.actionTab)}
+                      title={item.desc}
+                    >
+                      <span className={`attention-bullet ${item.type}`} />
+                      <span><strong>{item.label}</strong></span>
+                      <ChevronRight size={14} color="var(--ps-secondary-dark)" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 2. TODAY'S OPERATIONS: Simple horizontal metric row */}
+          <div>
+            <div style={{ fontSize: '0.8125rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ps-secondary-dark)', marginBottom: '0.65rem' }}>
+              Today's Operations
             </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-              {/* Active Overstays Alert */}
-              <div
-                className="card"
-                style={{
-                  borderLeft: `4px solid ${overstays.length > 0 ? 'var(--ps-state-occupied)' : 'var(--ps-state-available)'}`,
-                  cursor: 'pointer'
-                }}
-                onClick={() => setOperatorTab('overstays')}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <span className="metadata">Active Overstays</span>
-                  <span className={`status-tag ${overstays.length > 0 ? 'occupied' : 'available'}`}>
-                    {overstays.length} Flagged
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, margin: '0.35rem 0' }}>
-                  {overstays.filter(o => o.status === 'ACTIVE_OVERSTAY').length} Exceeded Dwell
-                </div>
-                <p className="metadata">
-                  {overstays.length > 0
-                    ? `Earliest overstay: Space ${overstays[0].spotNumber} (${overstays[0].durationMinutes} mins past window).`
-                    : 'All vehicles departed within booked reservation window.'}
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.75rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--ps-primary-dark)' }}>
-                  <span>Open Overstay Triage</span> <ChevronRight size={14} />
-                </div>
+            <div className="operator-metrics-strip">
+              <div className="operator-metric-block">
+                <span className="operator-metric-label">Available</span>
+                <span className="operator-metric-number" style={{ color: STATE_COLORS.AVAILABLE }}>{availableBays}</span>
               </div>
-
-              {/* Capacity Pressure Alert */}
-              <div className="card" style={{ borderLeft: `4px solid ${occupancyPercent >= 85 ? 'var(--ps-state-occupied)' : 'var(--ps-accent-dark)'}` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <span className="metadata">Capacity Pressure</span>
-                  <span className={`status-tag ${occupancyPercent >= 85 ? 'occupied' : 'available'}`}>
-                    {occupancyPercent >= 85 ? 'High Pressure' : 'Normal Operations'}
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, margin: '0.35rem 0' }}>
-                  {occupancyPercent}% Utilized
-                </div>
-                <p className="metadata">
-                  {availableBays} bays remain open across {facilityFloors.length} levels. {occupancyPercent >= 85 ? 'Algorithmic surge damping advised.' : 'Capacity headroom is healthy.'}
-                </p>
-                <div
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.75rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--ps-primary-dark)', cursor: 'pointer' }}
-                  onClick={() => setOperatorTab('occupancy')}
-                >
-                  <span>Inspect Floor Breakdown</span> <ChevronRight size={14} />
-                </div>
+              <div className="operator-metric-block">
+                <span className="operator-metric-label">Occupied</span>
+                <span className="operator-metric-number" style={{ color: STATE_COLORS.OCCUPIED }}>{occupiedBays}</span>
               </div>
-
-              {/* Operational Signals / Recommendations Pending */}
-              <div
-                className="card"
-                style={{ borderLeft: '4px solid var(--ps-accent-light)', cursor: 'pointer' }}
-                onClick={() => setOperatorTab('recommendations')}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <span className="metadata">Operational Signals</span>
-                  <span className="status-tag selected">
-                    {recommendations.filter(r => r.status === 'PENDING').length} Pending
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, margin: '0.35rem 0' }}>
-                  {recommendations.filter(r => r.status === 'PENDING').length} Recommendations
-                </div>
-                <p className="metadata">
-                  Gradient Boosting ML model detected peak window. Operator confirmation required.
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.75rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--ps-primary-dark)' }}>
-                  <span>Review System Actions</span> <ChevronRight size={14} />
-                </div>
+              <div className="operator-metric-block">
+                <span className="operator-metric-label">Reserved</span>
+                <span className="operator-metric-number" style={{ color: STATE_COLORS.RESERVED }}>{reservedBays}</span>
+              </div>
+              <div className="operator-metric-block">
+                <span className="operator-metric-label">Maintenance</span>
+                <span className="operator-metric-number" style={{ color: STATE_COLORS.MAINTENANCE }}>{maintenanceBays + blockedBays}</span>
+              </div>
+              <div className="operator-metric-block">
+                <span className="operator-metric-label">Utilization</span>
+                <span className="operator-metric-number" style={{ color: 'var(--ps-accent-dark)' }}>{occupancyPercent}%</span>
               </div>
             </div>
-          </section>
+          </div>
 
-          {/* 2. CURRENT OPERATIONS */}
-          <section>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.75rem' }}>
-              <Layers size={18} />
-              <h2 className="section-title" style={{ fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                2. Current Operations
-              </h2>
+          {/* 3. LIVE PARKING: Visual Center of Dashboard */}
+          <div>
+            <div style={{ fontSize: '0.8125rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ps-secondary-dark)', marginBottom: '0.65rem' }}>
+              Live Parking Operations
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
-              <div className="card">
-                <span className="metadata">Total Facility Bays</span>
-                <div style={{ fontSize: '1.75rem', fontWeight: 700 }}>{totalBays}</div>
-                <div className="metadata">Configured capacity</div>
-              </div>
+            <div className="operator-live-center-grid">
+              {/* Center Map Stage */}
+              <div className="operator-map-stage">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Interactive Facility Map</h3>
+                    <p className="metadata">{currentFloorSpots.length} spaces on {activeFloor}</p>
+                  </div>
 
-              <div className="card" style={{ borderLeft: `4px solid ${STATE_COLORS.AVAILABLE}` }}>
-                <span className="metadata">Available Bays</span>
-                <div style={{ fontSize: '1.75rem', fontWeight: 700, color: STATE_COLORS.AVAILABLE }}>{availableBays}</div>
-                <div className="metadata">Ready for ingress</div>
-              </div>
+                  <div className="floor-pill-group">
+                    {facilityFloors.map((fl) => (
+                      <button
+                        key={fl}
+                        className={`floor-pill ${activeFloor === fl ? 'active' : ''}`}
+                        onClick={() => {
+                          setActiveFloor(fl);
+                          setSelectedSpotForAction(null);
+                        }}
+                      >
+                        {fl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-              <div className="card" style={{ borderLeft: `4px solid ${STATE_COLORS.OCCUPIED}` }}>
-                <span className="metadata">Occupied Bays</span>
-                <div style={{ fontSize: '1.75rem', fontWeight: 700, color: STATE_COLORS.OCCUPIED }}>{occupiedBays}</div>
-                <div className="metadata">Vehicles actively parked</div>
-              </div>
-
-              <div className="card" style={{ borderLeft: `4px solid ${STATE_COLORS.RESERVED}` }}>
-                <span className="metadata">Reserved (En Route)</span>
-                <div style={{ fontSize: '1.75rem', fontWeight: 700, color: STATE_COLORS.RESERVED }}>{reservedBays}</div>
-                <div className="metadata">Confirmed hold window</div>
-              </div>
-
-              <div className="card" style={{ borderLeft: `4px solid ${STATE_COLORS.BLOCKED}` }}>
-                <span className="metadata">Blocked / Maintenance</span>
-                <div style={{ fontSize: '1.75rem', fontWeight: 700 }}>{blockedBays + maintenanceBays}</div>
-                <div className="metadata">Offline from public pool</div>
-              </div>
-            </div>
-          </section>
-
-          {/* 3. LIVE PARKING OPERATIONS (INTERACTIVE MAP) */}
-          <section>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div>
-                <h2 className="section-title" style={{ fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  3. Live Parking Operations — Interactive Facility Map
-                </h2>
-                <span className="metadata">Select any parking bay to inspect booking context or apply operational state overrides</span>
-              </div>
-
-              {/* Floor Switcher */}
-              <div className="floor-pill-group">
-                {facilityFloors.map((fl) => (
-                  <button
-                    key={fl}
-                    className={`floor-pill ${activeFloor === fl ? 'active' : ''}`}
-                    onClick={() => {
-                      setActiveFloor(fl);
-                      setSelectedSpotForAction(null);
-                    }}
-                  >
-                    {fl}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="content-grid content-grid-split">
-              {/* Reusable Interactive Parking Map */}
-              <div>
                 <ParkingMap
                   floors={facilityFloors}
                   activeFloor={activeFloor}
@@ -924,106 +1042,147 @@ export function OperatorExperience({
                   onSelectSpot={(spot) => setSelectedSpotForAction(spot)}
                   isOperator={true}
                 />
-              </div>
 
-              {/* Contextual Spot Override Drawer */}
-              <div>
-                {selectedSpotForAction ? (
-                  <div className="card" style={{ border: '2px solid var(--ps-primary-dark)', position: 'sticky', top: '80px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                      <div>
-                        <span className="eyebrow">BAY OVERRIDE CONTROL</span>
-                        <h3 style={{ fontSize: '1.35rem', margin: '0.2rem 0' }}>
-                          Space {selectedSpotForAction.number}
-                        </h3>
-                        <p className="metadata">{activeFloor} · Classification: <strong>{selectedSpotForAction.type || 'STANDARD'}</strong></p>
-                      </div>
-                      <span className={`status-tag ${selectedSpotForAction.status.toLowerCase()}`}>
+                {selectedSpotForAction && (
+                  <div style={{
+                    marginTop: '1.25rem',
+                    padding: '1rem',
+                    backgroundColor: '#FAF8F2',
+                    border: '1px solid var(--ps-secondary-light)',
+                    borderRadius: 'var(--ps-radius-sm)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '0.75rem'
+                  }}>
+                    <div>
+                      <strong style={{ fontSize: '0.9375rem' }}>Space {selectedSpotForAction.number}</strong> ({selectedSpotForAction.type || 'STANDARD'})
+                      <span className={`status-tag ${selectedSpotForAction.status.toLowerCase()}`} style={{ marginLeft: '0.5rem' }}>
                         {selectedSpotForAction.status}
                       </span>
                     </div>
-
-                    <div style={{
-                      backgroundColor: 'var(--ps-primary-light)',
-                      borderRadius: 'var(--ps-radius-sm)',
-                      padding: '0.75rem',
-                      marginBottom: '1.25rem',
-                      fontSize: '0.8125rem'
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                        <span className="metadata">Rate Profile</span>
-                        <strong>₹{selectedSpotForAction.rate || selectedFacility?.hourlyRate || 50}/hr</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span className="metadata">Telemetry Audit</span>
-                        <span>Auditable by backend</span>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      {selectedSpotForAction.status !== 'AVAILABLE' && (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          disabled={spotActionLoading}
+                          onClick={() => handleApplySpotAction('AVAILABLE')}
+                        >
+                          Vacate
+                        </button>
+                      )}
+                      {selectedSpotForAction.status !== 'BLOCKED' && (
+                        <button
+                          className="btn btn-outline btn-sm"
+                          disabled={spotActionLoading}
+                          onClick={() => handleApplySpotAction('BLOCKED')}
+                        >
+                          Block
+                        </button>
+                      )}
+                      {selectedSpotForAction.status !== 'MAINTENANCE' && (
+                        <button
+                          className="btn btn-outline btn-sm"
+                          disabled={spotActionLoading}
+                          onClick={() => handleApplySpotAction('MAINTENANCE')}
+                        >
+                          Maintenance
+                        </button>
+                      )}
                       <button
-                        className="btn btn-secondary btn-sm btn-block"
-                        disabled={spotActionLoading || selectedSpotForAction.status === 'AVAILABLE'}
-                        onClick={() => handleApplySpotAction('AVAILABLE')}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
+                        className="btn btn-outline btn-sm"
+                        onClick={() => setSelectedSpotForAction(null)}
                       >
-                        <CheckCircle2 size={15} color={STATE_COLORS.AVAILABLE} /> Mark Available (Vacate Space)
+                        Dismiss
                       </button>
-
-                      <button
-                        className="btn btn-secondary btn-sm btn-block"
-                        disabled={spotActionLoading || selectedSpotForAction.status === 'BLOCKED'}
-                        onClick={() => handleApplySpotAction('BLOCKED')}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
-                      >
-                        <ShieldAlert size={15} color={STATE_COLORS.BLOCKED} /> Block Bay (VIP / Reserved Staff)
-                      </button>
-
-                      <button
-                        className="btn btn-secondary btn-sm btn-block"
-                        disabled={spotActionLoading || selectedSpotForAction.status === 'MAINTENANCE'}
-                        onClick={() => handleApplySpotAction('MAINTENANCE')}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
-                      >
-                        <Wrench size={15} color={STATE_COLORS.MAINTENANCE} /> Place Under Maintenance
-                      </button>
-
-                      <button
-                        className="btn btn-secondary btn-sm btn-block"
-                        disabled={spotActionLoading || selectedSpotForAction.status === 'OCCUPIED'}
-                        onClick={() => handleApplySpotAction('OCCUPIED')}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
-                      >
-                        <Car size={15} color={STATE_COLORS.OCCUPIED} /> Manual Vehicle Occupied
-                      </button>
-                    </div>
-
-                    <button
-                      className="btn btn-outline btn-sm btn-block"
-                      onClick={() => setSelectedSpotForAction(null)}
-                      disabled={spotActionLoading}
-                    >
-                      Close Spot Panel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="card" style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', textAlign: 'center', padding: '2.5rem 1.5rem' }}>
-                    <SlidersHorizontal size={32} style={{ margin: '0 auto 1rem', color: 'var(--ps-secondary-dark)' }} />
-                    <h3 style={{ fontSize: '1.1rem', marginBottom: '0.4rem' }}>No Bay Selected</h3>
-                    <p className="metadata" style={{ maxWidth: '280px', margin: '0 auto 1.5rem' }}>
-                      Click any parking bay in the layout map to inspect real-time state, rate profile, or apply operational overrides.
-                    </p>
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span className="status-tag available">● Available</span>
-                      <span className="status-tag occupied">● Occupied</span>
-                      <span className="status-tag reserved">● Reserved</span>
-                      <span className="status-tag blocked">● Blocked</span>
                     </div>
                   </div>
                 )}
               </div>
+
+              {/* Side Telemetry Cards Beside Map */}
+              <div className="operator-side-telemetry">
+                {/* Facility Status Card */}
+                <div className="operator-side-card">
+                  <div className="operator-side-card-title">
+                    <span>Facility Status</span>
+                    <span style={{ color: '#2E7D32', fontSize: '0.75rem' }}>● OPERATIONAL</span>
+                  </div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>
+                    {selectedFacility?.name || 'Riverside Facility'}
+                  </div>
+                  <div className="metadata" style={{ marginBottom: '0.65rem' }}>
+                    {selectedFacility?.address || 'Connaught Place, New Delhi'}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', paddingTop: '0.5rem', borderTop: '1px solid var(--ps-secondary-light)' }}>
+                    <span className="metadata">Operating Window</span>
+                    <span>{selectedFacility?.openStatus || 'Open 24/7'}</span>
+                  </div>
+                </div>
+
+                {/* Capacity Card */}
+                <div className="operator-side-card">
+                  <div className="operator-side-card-title">
+                    <span>Capacity</span>
+                    <span>{totalBays} Bays</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
+                    <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>{occupiedBays + reservedBays}</span>
+                    <span className="metadata">{availableBays} bays open</span>
+                  </div>
+                  <div style={{ height: '6px', backgroundColor: '#E6DFD1', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ width: `${occupancyPercent}%`, height: '100%', backgroundColor: occupancyPercent >= 85 ? '#C62828' : 'var(--ps-accent-dark)' }} />
+                  </div>
+                </div>
+
+                {/* Active Bookings Card */}
+                <div className="operator-side-card">
+                  <div className="operator-side-card-title">
+                    <span>Active Bookings</span>
+                    <span className="metadata" style={{ cursor: 'pointer' }} onClick={() => setOperatorTab('bookings')}>
+                      View All ({bookings.length})
+                    </span>
+                  </div>
+                  {bookings.slice(0, 3).map((b) => (
+                    <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', padding: '0.4rem 0', borderBottom: '1px solid var(--ps-secondary-light)' }}>
+                      <div>
+                        <strong>Bay {b.spotNumber || 'A-12'}</strong>
+                        <span className="metadata" style={{ marginLeft: '0.4rem' }}>{b.vehiclePlate || 'DL 01 AB 1234'}</span>
+                      </div>
+                      <span style={{ color: '#2E7D32', fontWeight: 600 }}>{b.status || 'CONFIRMED'}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Overstays Card */}
+                <div className="operator-side-card">
+                  <div className="operator-side-card-title">
+                    <span>Overstays</span>
+                    <span className="metadata" style={{ cursor: 'pointer' }} onClick={() => setOperatorTab('overstays')}>
+                      {overstays.length} Flagged
+                    </span>
+                  </div>
+                  {overstays.length === 0 ? (
+                    <p className="metadata" style={{ fontSize: '0.8125rem' }}>No active overstays detected across all levels.</p>
+                  ) : (
+                    overstays.slice(0, 2).map((o) => (
+                      <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', padding: '0.4rem 0', borderBottom: '1px solid var(--ps-secondary-light)' }}>
+                        <div>
+                          <strong style={{ color: '#C62828' }}>Bay {o.spotNumber}</strong>
+                          <div className="metadata">Plate: {o.vehiclePlate}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ color: '#C62828', fontWeight: 600 }}>+{o.durationMinutes}m</span>
+                          <div className="metadata">₹{o.accruedPenalty} fee</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
-          </section>
+          </div>
 
           {/* 4. BUSINESS PERFORMANCE */}
           <section>
@@ -1517,32 +1676,38 @@ export function OperatorExperience({
       )}
 
       {/* =====================================================================
-          TAB 4: SPOT REGISTRY
+          TAB 4: PARKING SPOTS (DEDICATED MANAGEMENT PAGE)
           ===================================================================== */}
       {operatorTab === 'spots' && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div className="operator-spots-header">
             <div>
-              <h2 className="section-title">Parking Bay Registry</h2>
-              <p className="metadata">{filteredSpotsRegistry.length} bays on {activeFloor}</p>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0, color: 'var(--ps-primary-dark)' }}>
+                Parking Spots
+              </h2>
+              <p className="metadata" style={{ marginTop: '0.25rem', fontSize: '0.9375rem' }}>
+                Manage every space in your facility.
+              </p>
             </div>
 
-            {/* Floor switcher */}
-            <div className="floor-pill-group">
-              {facilityFloors.map((fl) => (
-                <button
-                  key={fl}
-                  className={`floor-pill ${activeFloor === fl ? 'active' : ''}`}
-                  onClick={() => setActiveFloor(fl)}
-                >
-                  {fl}
-                </button>
-              ))}
-            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.6rem 1.25rem' }}
+              onClick={() => {
+                setNewSpotFacilityId(selectedFacility?.id || '');
+                setNewSpotFloor(activeFloor);
+                setAddSpotError(null);
+                setIsAddSpotModalOpen(true);
+              }}
+            >
+              <Plus size={16} />
+              <span>Add Parking Spot</span>
+            </button>
           </div>
 
-          {/* Search & State Filter Controls */}
-          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+          {/* Clean Filters Row: Search, Floor, Type, Status */}
+          <div className="operator-spots-filters">
             <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
               <input
                 type="text"
@@ -1550,107 +1715,148 @@ export function OperatorExperience({
                 placeholder="Search by space number or ID..."
                 value={spotSearch}
                 onChange={(e) => setSpotSearch(e.target.value)}
-                style={{ paddingLeft: '2rem' }}
+                style={{ paddingLeft: '2.2rem', backgroundColor: '#FFFFFF' }}
               />
               <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--ps-secondary-dark)' }} />
             </div>
 
             <select
               className="form-select"
-              value={spotStateFilter}
-              onChange={(e) => setSpotStateFilter(e.target.value)}
-              style={{ width: '160px' }}
+              value={activeFloor}
+              onChange={(e) => setActiveFloor(e.target.value)}
+              style={{ width: '150px', backgroundColor: '#FFFFFF' }}
             >
-              <option value="ALL">All States</option>
-              <option value="AVAILABLE">Available</option>
-              <option value="OCCUPIED">Occupied</option>
-              <option value="RESERVED">Reserved</option>
-              <option value="MAINTENANCE">Maintenance</option>
-              <option value="BLOCKED">Blocked</option>
+              {facilityFloors.map((fl) => (
+                <option key={fl} value={fl}>{fl}</option>
+              ))}
             </select>
 
             <select
               className="form-select"
               value={spotTypeFilter}
               onChange={(e) => setSpotTypeFilter(e.target.value)}
-              style={{ width: '160px' }}
+              style={{ width: '160px', backgroundColor: '#FFFFFF' }}
             >
-              <option value="ALL">All Classifications</option>
+              <option value="ALL">All Types</option>
               <option value="STANDARD">Standard</option>
-              <option value="EV_CHARGING">EV Charging</option>
+              <option value="COMPACT">Compact</option>
+              <option value="EV">EV Charging</option>
               <option value="ACCESSIBLE">Accessible</option>
-              <option value="VIP">VIP</option>
+            </select>
+
+            <select
+              className="form-select"
+              value={spotStateFilter}
+              onChange={(e) => setSpotStateFilter(e.target.value)}
+              style={{ width: '160px', backgroundColor: '#FFFFFF' }}
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="AVAILABLE">Available</option>
+              <option value="OCCUPIED">Occupied</option>
+              <option value="RESERVED">Reserved</option>
+              <option value="MAINTENANCE">Maintenance</option>
+              <option value="BLOCKED">Blocked</option>
             </select>
           </div>
 
+          {/* Parking Spot Registry Clean Table */}
           {filteredSpotsRegistry.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
+            <div style={{
+              backgroundColor: '#FFFFFF',
+              border: '1px solid var(--ps-secondary-light)',
+              borderRadius: 'var(--ps-radius-sm)',
+              textAlign: 'center',
+              padding: '3rem 1.5rem'
+            }}>
               <p className="metadata">No parking bays match the selected filters on {activeFloor}.</p>
             </div>
           ) : (
-            <div className="data-table-wrapper">
-              <table className="data-table">
+            <div style={{ overflowX: 'auto' }}>
+              <table className="clean-table">
                 <thead>
                   <tr>
-                    <th>Bay ID</th>
-                    <th>Level</th>
-                    <th>Classification</th>
-                    <th>State</th>
-                    <th>Hourly Rate</th>
+                    <th>Spot</th>
+                    <th>Floor</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Booking</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredSpotsRegistry.map((spot) => (
-                    <tr key={spot.id}>
-                      <td><strong style={{ fontFamily: 'var(--ps-font-mono)' }}>{spot.number}</strong></td>
-                      <td>{spot.floor}</td>
-                      <td><span className="metadata">{spot.type || 'STANDARD'}</span></td>
-                      <td>
-                        <span className={`status-tag ${spot.status.toLowerCase()}`}>
-                          {spot.status}
-                        </span>
-                      </td>
-                      <td>₹{spot.rate || selectedFacility?.hourlyRate || 50}/hr</td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '0.35rem' }}>
-                          {spot.status !== 'AVAILABLE' && (
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => {
-                                setSelectedSpotForAction(spot);
-                                handleApplySpotAction('AVAILABLE');
-                              }}
-                            >
-                              Vacate
-                            </button>
+                  {filteredSpotsRegistry.map((spot) => {
+                    const activeBooking = bookings.find(
+                      (b) =>
+                        (b.spotNumber === spot.number || b.spotId === spot.id || b.slotId === spot.id) &&
+                        (b.status === 'CONFIRMED' || b.status === 'ACTIVE' || b.status === 'PENDING')
+                    );
+
+                    return (
+                      <tr key={spot.id}>
+                        <td>
+                          <strong style={{ fontFamily: 'var(--ps-font-mono)' }}>{spot.number}</strong>
+                        </td>
+                        <td>{spot.floor}</td>
+                        <td style={{ textTransform: 'capitalize' }}>
+                          {spot.type?.toLowerCase().replace('_', ' ') || 'standard'}
+                        </td>
+                        <td>
+                          <span className={`status-tag ${spot.status.toLowerCase()}`}>
+                            {spot.status}
+                          </span>
+                        </td>
+                        <td>
+                          {activeBooking ? (
+                            <span style={{ fontSize: '0.8125rem', color: 'var(--ps-primary-dark)' }}>
+                              #{String(activeBooking.id).slice(-4)} ({activeBooking.vehiclePlate || 'Reserved'})
+                            </span>
+                          ) : (
+                            <span className="metadata">—</span>
                           )}
-                          {spot.status !== 'BLOCKED' && (
-                            <button
-                              className="btn btn-outline btn-sm"
-                              onClick={() => {
-                                setSelectedSpotForAction(spot);
-                                handleApplySpotAction('BLOCKED');
-                              }}
-                            >
-                              Block
-                            </button>
-                          )}
-                          {spot.status !== 'MAINTENANCE' && (
-                            <button
-                              className="btn btn-outline btn-sm"
-                              onClick={() => {
-                                setSelectedSpotForAction(spot);
-                                handleApplySpotAction('MAINTENANCE');
-                              }}
-                            >
-                              Service
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '0.35rem' }}>
+                            {spot.status !== 'AVAILABLE' && (
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                disabled={spotActionLoading}
+                                onClick={() => {
+                                  setSelectedSpotForAction(spot);
+                                  handleApplySpotAction('AVAILABLE');
+                                }}
+                              >
+                                Vacate
+                              </button>
+                            )}
+                            {spot.status !== 'BLOCKED' && (
+                              <button
+                                className="btn btn-outline btn-sm"
+                                disabled={spotActionLoading}
+                                onClick={() => {
+                                  setSelectedSpotForAction(spot);
+                                  handleApplySpotAction('BLOCKED');
+                                }}
+                              >
+                                Block
+                              </button>
+                            )}
+                            {spot.status !== 'MAINTENANCE' && (
+                              <button
+                                className="btn btn-outline btn-sm"
+                                disabled={spotActionLoading}
+                                onClick={() => {
+                                  setSelectedSpotForAction(spot);
+                                  handleApplySpotAction('MAINTENANCE');
+                                }}
+                              >
+                                Service
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2243,107 +2449,42 @@ export function OperatorExperience({
       )}
 
       {/* =====================================================================
-          TAB 12: AI OPERATIONS ASSISTANT
+          TAB 12: PARKSPOT COPILOT CHATBOT
           ===================================================================== */}
-      {operatorTab === 'assistant' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '860px' }}>
-          <div>
-            <h2 className="section-title">AI Operations Assistant</h2>
-            <p className="metadata">Structured operational synthesis, overstay explanations, and pricing decision support</p>
-          </div>
-
-          <div className="card">
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Ask any operational question regarding facilities, occupancy, or pricing..."
-                value={aiQuestion}
-                onChange={(e) => setAiQuestion(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAskAIAssistant()}
-              />
+      {(operatorTab === 'assistant' || operatorTab === 'copilot') && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '880px', width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div>
+              <h2 className="section-title">ParkSpot Copilot</h2>
+              <p className="metadata">Real conversational intelligence for parking facility operations, demand forecasting, and yield management</p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button
-                className="btn btn-primary"
-                onClick={() => handleAskAIAssistant()}
-                disabled={aiLoading || !aiQuestion.trim()}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap' }}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setOperatorTab('overview')}
               >
-                {aiLoading ? <ActionLoader text="Processing..." /> : <><Send size={15} /> Submit</>}
+                Dashboard
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setOperatorTab('optimization')}
+              >
+                Recommendations
               </button>
             </div>
-
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-              {[
-                'Why is utilization high tonight?',
-                'Explain peak demand hours and volume trends.',
-                'What operational adjustments are recommended for tomorrow?',
-                'Summarize overstay activity across all bays.'
-              ].map((chip) => (
-                <button
-                  key={chip}
-                  className="btn btn-secondary btn-sm"
-                  style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
-                  onClick={() => {
-                    setAiQuestion(chip);
-                    handleAskAIAssistant(chip);
-                  }}
-                  disabled={aiLoading}
-                >
-                  {chip}
-                </button>
-              ))}
-            </div>
-
-            {aiResponse ? (
-              <div style={{
-                backgroundColor: 'var(--ps-primary-light)',
-                border: '1px solid var(--ps-secondary-light)',
-                borderRadius: 'var(--ps-radius-sm)',
-                padding: '1.5rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.75rem', fontWeight: 700 }}>
-                  <Sparkles size={18} color="var(--ps-accent-dark)" />
-                  <span>Operations Synthesis Report</span>
-                </div>
-                <p style={{ fontSize: '0.9375rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-                  {aiResponse.answer}
-                </p>
-
-                {aiResponse.keyMetrics && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
-                    {Object.entries(aiResponse.keyMetrics).map(([k, v]) => (
-                      <div key={k} style={{ backgroundColor: '#FFFFFF', padding: '0.5rem 0.75rem', borderRadius: 'var(--ps-radius-sm)', border: '1px solid var(--ps-secondary-light)' }}>
-                        <div className="metadata" style={{ textTransform: 'capitalize' }}>{k.replace(/([A-Z])/g, ' $1')}</div>
-                        <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {aiResponse.recommendedAction && (
-                  <div style={{
-                    padding: '0.75rem 1rem',
-                    backgroundColor: 'rgba(243, 244, 86, 0.25)',
-                    border: '1px solid var(--ps-accent-dark)',
-                    borderRadius: 'var(--ps-radius-sm)',
-                    fontSize: '0.875rem',
-                    marginBottom: '1rem'
-                  }}>
-                    <strong>Recommended Action:</strong> {aiResponse.recommendedAction}
-                  </div>
-                )}
-
-                <div style={{ fontSize: '0.75rem', color: 'var(--ps-secondary-dark)', fontStyle: 'italic' }}>
-                  {aiResponse.disclaimer}
-                </div>
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--ps-secondary-dark)' }}>
-                <Bot size={36} style={{ margin: '0 auto 0.75rem', color: 'var(--ps-secondary-dark)' }} />
-                <p className="metadata">Select a suggested query or type a question above to generate operational insights.</p>
-              </div>
-            )}
           </div>
+
+          <ParkSpotCopilot
+            operatorName={operatorGreetingName || 'Lara'}
+            selectedFacility={selectedFacility}
+            onNavigateTab={(tab) => setOperatorTab(tab)}
+            isLiveConnected={isLiveConnected}
+            onViewRecommendation={(rec) => {
+              setOperatorTab('optimization');
+            }}
+          />
         </div>
       )}
 
@@ -2404,8 +2545,13 @@ export function OperatorExperience({
 
           <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '1.5rem' }}>
             <div className="form-group">
+              <label className="form-label">Account Type</label>
+              <input type="text" className="form-input" value="OPERATOR" readOnly />
+            </div>
+
+            <div className="form-group">
               <label className="form-label">Organization Name</label>
-              <input type="text" className="form-input" defaultValue="Metro Infrastructure Operations Ltd" readOnly />
+              <input type="text" className="form-input" value={activeUser?.organizationName || 'ParkSpot Operator'} readOnly />
             </div>
 
             <div className="form-group">
@@ -2414,17 +2560,13 @@ export function OperatorExperience({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Active Role</label>
-              <select
-                className="form-select"
+              <label className="form-label">Internal Role (Read Only)</label>
+              <input
+                type="text"
+                className="form-input"
                 value={activeRole}
-                onChange={(e) => setActiveRole(e.target.value)}
-              >
-                <option value="OWNER">OWNER — Full Governance, Financials & Pricing Approvals</option>
-                <option value="ADMIN">ADMIN — Tenant Administrator</option>
-                <option value="MANAGER">MANAGER — Operations Manager</option>
-                <option value="OPERATOR">OPERATOR — Bay Overrides & Floor Telemetry</option>
-              </select>
+                readOnly
+              />
             </div>
 
             <div className="form-group">
@@ -2486,6 +2628,139 @@ export function OperatorExperience({
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+        </div>
+      </div>
+
+      {/* =====================================================================
+          ADD PARKING SPOT MODAL
+          ===================================================================== */}
+      {isAddSpotModalOpen && (
+        <div className="clean-modal-backdrop" onClick={() => setIsAddSpotModalOpen(false)} role="dialog" aria-modal="true">
+          <div className="clean-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="clean-modal-header">
+              <h3 className="clean-modal-title">Add Parking Spot</h3>
+              <button
+                type="button"
+                onClick={() => setIsAddSpotModalOpen(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ps-secondary-dark)' }}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {addSpotError && (
+              <div style={{
+                backgroundColor: '#FDE8E8',
+                color: '#9B1C1C',
+                border: '1px solid #F87171',
+                borderRadius: 'var(--ps-radius-sm)',
+                padding: '0.65rem 0.85rem',
+                marginBottom: '1rem',
+                fontSize: '0.8125rem'
+              }}>
+                {addSpotError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateSpotSubmit}>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Facility</label>
+                <select
+                  className="form-select"
+                  value={newSpotFacilityId}
+                  onChange={(e) => {
+                    setNewSpotFacilityId(e.target.value);
+                    const target = facilities.find((f) => f.id === e.target.value);
+                    if (target?.floors && target.floors.length > 0) {
+                      setNewSpotFloor(target.floors[0]);
+                    }
+                  }}
+                  required
+                >
+                  {facilities.map((fac) => (
+                    <option key={fac.id} value={fac.id}>{fac.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Floor</label>
+                <select
+                  className="form-select"
+                  value={newSpotFloor}
+                  onChange={(e) => setNewSpotFloor(e.target.value)}
+                  required
+                >
+                  {facilityFloors.map((fl) => (
+                    <option key={fl} value={fl}>{fl}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Spot ID</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. A-12"
+                  value={newSpotNumber}
+                  onChange={(e) => setNewSpotNumber(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Type</label>
+                <select
+                  className="form-select"
+                  value={newSpotType}
+                  onChange={(e) => setNewSpotType(e.target.value)}
+                >
+                  <option value="STANDARD">Standard</option>
+                  <option value="COMPACT">Compact</option>
+                  <option value="EV">EV Charging</option>
+                  <option value="ACCESSIBLE">Accessible</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <label className="form-label">Status</label>
+                <select
+                  className="form-select"
+                  value={newSpotStatus}
+                  onChange={(e) => setNewSpotStatus(e.target.value)}
+                >
+                  <option value="AVAILABLE">Available</option>
+                  <option value="OCCUPIED">Occupied</option>
+                  <option value="RESERVED">Reserved</option>
+                  <option value="MAINTENANCE">Maintenance</option>
+                  <option value="BLOCKED">Blocked</option>
+                </select>
+              </div>
+
+              <div className="clean-modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsAddSpotModalOpen(false)}
+                  disabled={addSpotLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={addSpotLoading}
+                >
+                  {addSpotLoading ? <ActionLoader text="Creating spot..." /> : 'Create Spot'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

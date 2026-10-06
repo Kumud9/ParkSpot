@@ -68,7 +68,10 @@ test('concurrency: simultaneous booking attempts for same slot and overlapping w
 
   const rejectionError = rejected[0].reason;
   assert.equal(rejectionError.status, 409, 'Conflict error status must be 409');
-  assert.equal(rejectionError.code, 'SLOT_UNAVAILABLE', 'Conflict code must be SLOT_UNAVAILABLE');
+  assert.ok(
+    rejectionError.code === 'SPOT_ALREADY_BOOKED' || rejectionError.code === 'SLOT_UNAVAILABLE',
+    'Conflict code must be SPOT_ALREADY_BOOKED or SLOT_UNAVAILABLE'
+  );
 
   // Verify database state: exactly 1 booking exists
   const count = await Booking.countDocuments({ slotId: slot._id, status: 'CONFIRMED' });

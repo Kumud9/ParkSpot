@@ -30,13 +30,15 @@
 .parkspot-logo-container.on-dark {
   background-color: #FFFFFF;
   border-radius: var(--ps-radius-sm, 6px);
-  padding: 4px 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  padding: 5px 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  display: inline-flex;
+  align-items: center;
 }
 
 .parkspot-logo-container.on-dark.variant-mark {
-  padding: 3px 5px;
-  border-radius: var(--ps-radius-sm, 4px);
+  padding: 4px 6px;
+  border-radius: var(--ps-radius-sm, 5px);
 }
 
 /* Size Variants */
@@ -45,6 +47,9 @@
 }
 .parkspot-logo-container.size-sm .parkspot-logo-img {
   height: 32px;
+}
+.parkspot-logo-container.size-nav .parkspot-logo-img {
+  height: 42px;
 }
 .parkspot-logo-container.size-md .parkspot-logo-img {
   height: 48px;
@@ -55,3 +60,11 @@
 .parkspot-logo-container.size-xl .parkspot-logo-img {
   height: 96px;
 }
+
+/* Responsive Logo Adjustments */
+@media (max-width: 768px) {
+  .parkspot-logo-container.size-nav .parkspot-logo-img {
+    height: 34px;
+  }
+}
+

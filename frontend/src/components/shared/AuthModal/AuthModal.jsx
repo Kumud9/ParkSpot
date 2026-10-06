@@ -1,51 +1,78 @@
 import React, { useState } from 'react';
 import { Logo } from '../Logo';
 import { ActionLoader } from '../Loading';
-import { api, authStorage } from '../../../services/api';
-import { X, Lock, Mail, User, ShieldAlert, Check } from 'lucide-react';
+import { useAuth } from '../../../context/AuthContext';
+import { X, ShieldAlert, KeyRound } from 'lucide-react';
 
 export function AuthModal({ isOpen, onClose, onAuthSuccess, defaultRole = 'driver' }) {
+  const { login, signup } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
-  const [role, setRole] = useState(defaultRole); // 'driver' | 'operator'
-  const [email, setEmail] = useState('user@parkspot.test');
-  const [password, setPassword] = useState('Pass@12345');
-  const [name, setName] = useState('Priya Sharma');
+  const [role] = useState(defaultRole); // 'driver' | 'operator'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   if (!isOpen) return null;
 
-  const handleRoleToggle = (selectedRole) => {
-    setRole(selectedRole);
-    if (selectedRole === 'driver') {
-      setEmail('user@parkspot.test');
-      setPassword('Pass@12345');
-      setName('Priya Sharma');
-    } else {
-      setEmail('admin@urbanpark.test');
-      setPassword('Pass@12345');
-      setName('UrbanPark Operations Admin');
-    }
-    setError(null);
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
     setError(null);
 
+    const trimmedEmail = email.trim();
+    const trimmedName = name.trim();
+
+    // Client-side validations
+    if (isSignUp) {
+      if (!trimmedName || trimmedName.length < 2) {
+        setError('Please enter your full name (at least 2 characters).');
+        return;
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!trimmedEmail || !emailRegex.test(trimmedEmail)) {
+        setError('Please enter a valid email address with a domain (e.g. kumud@gmail.com).');
+        return;
+      }
+      if (!password || password.length < 8) {
+        setError('Password must be at least 8 characters long.');
+        return;
+      }
+    } else {
+      if (!trimmedEmail) {
+        setError('Please enter your email address.');
+        return;
+      }
+      if (!password) {
+        setError('Please enter your password.');
+        return;
+      }
+    }
+
+    setLoading(true);
+
+    const targetAccountType = role === 'driver' ? 'DRIVER' : 'OPERATOR';
+
     try {
-      const res = await api.login(email, password);
-      if (res?.token) {
-        if (role === 'driver') {
-          authStorage.setDriverToken(res.token);
-        } else {
-          authStorage.setOperatorToken(res.token);
-        }
-        onAuthSuccess && onAuthSuccess(res.user, role);
+      let authUser;
+      if (isSignUp) {
+        authUser = await signup({
+          name: trimmedName,
+          email: trimmedEmail,
+          password,
+          accountType: targetAccountType,
+          organizationName: role === 'operator' ? `${trimmedName}'s Operations` : undefined
+        });
+      } else {
+        authUser = await login(trimmedEmail, password, targetAccountType);
+      }
+
+      if (authUser) {
+        const resolvedRole = (authUser.accountType || '').toUpperCase() === 'OPERATOR' ? 'operator' : 'driver';
+        onAuthSuccess && onAuthSuccess(authUser, resolvedRole);
         onClose();
       } else {
-        setError('Login failed. Please verify credentials.');
+        setError(`${isSignUp ? 'Registration' : 'Login'} failed. Please verify credentials.`);
       }
     } catch (err) {
       setError(err.message || 'Authentication error.');
@@ -83,33 +110,6 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess, defaultRole = 'drive
           </p>
         </div>
 
-        {/* Role Switcher Pill */}
-        <div style={{
-          display: 'flex',
-          backgroundColor: 'var(--ps-primary-light, #F4F2E7)',
-          padding: '3px',
-          borderRadius: 'var(--ps-radius-sm)',
-          marginBottom: '1.25rem',
-          border: '1px solid var(--ps-secondary-light)'
-        }}>
-          <button
-            type="button"
-            className={`btn btn-sm ${role === 'driver' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ flex: 1, border: 'none' }}
-            onClick={() => handleRoleToggle('driver')}
-          >
-            Driver Portal
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${role === 'operator' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ flex: 1, border: 'none' }}
-            onClick={() => handleRoleToggle('operator')}
-          >
-            Operator B2B
-          </button>
-        </div>
-
         {error && (
           <div style={{
             backgroundColor: '#FDE8E8',
@@ -121,59 +121,89 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess, defaultRole = 'drive
             fontSize: '0.8125rem',
             display: 'flex',
             alignItems: 'center',
-            gap: '0.4rem'
+            gap: '0.4rem',
+            textAlign: 'left'
           }}>
-            <ShieldAlert size={16} />
+            <ShieldAlert size={16} style={{ flexShrink: 0 }} />
             <span>{error}</span>
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
           {isSignUp && (
-            <div className="form-group">
+            <div className="form-group" style={{ marginBottom: '1rem' }}>
               <label className="form-label" htmlFor="auth-name">Full Name</label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  id="auth-name"
-                  type="text"
-                  className="form-input"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
+              <input
+                id="auth-name"
+                type="text"
+                className="form-input"
+                placeholder="e.g. Kumud Chouhan"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
             </div>
           )}
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="auth-email">Email Address</label>
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label className="form-label" htmlFor="auth-email">Email Address</label>
+              {!isSignUp && (
+                <button
+                  type="button"
+                  onClick={handleUseDemo}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--ps-accent-dark, #8A7A00)',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '2px',
+                    padding: 0
+                  }}
+                >
+                  <KeyRound size={12} /> Fill demo account
+                </button>
+              )}
+            </div>
             <input
               id="auth-email"
               type="email"
               className="form-input"
+              placeholder="e.g. kumud@gmail.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
           </div>
 
-          <div className="form-group">
+          <div className="form-group" style={{ marginBottom: '1.25rem' }}>
             <label className="form-label" htmlFor="auth-password">Password</label>
             <input
               id="auth-password"
               type="password"
               className="form-input"
+              minLength={8}
+              placeholder="Min. 8 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
+            {isSignUp && (
+              <span className="metadata" style={{ fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
+                Must be at least 8 characters long.
+              </span>
+            )}
           </div>
 
           <button
             type="submit"
             className="btn btn-primary btn-block"
             disabled={loading}
-            style={{ padding: '0.75rem', marginTop: '0.5rem', fontWeight: 600 }}
+            style={{ padding: '0.75rem', fontWeight: 600 }}
           >
             {loading ? (
               <ActionLoader text={isSignUp ? 'Creating account...' : 'Signing in...'} />
@@ -189,8 +219,22 @@ export function AuthModal({ isOpen, onClose, onAuthSuccess, defaultRole = 'drive
           </span>
           <button
             type="button"
-            onClick={() => { setIsSignUp(!isSignUp); setError(null); }}
-            style={{ background: 'none', border: 'none', color: 'var(--ps-primary-dark)', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', font: 'inherit' }}
+            onClick={() => {
+              setIsSignUp(!isSignUp);
+              setError(null);
+              setEmail('');
+              setPassword('');
+              setName('');
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--ps-primary-dark)',
+              fontWeight: 700,
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              font: 'inherit'
+            }}
           >
             {isSignUp ? 'Sign In' : 'Sign Up'}
           </button>

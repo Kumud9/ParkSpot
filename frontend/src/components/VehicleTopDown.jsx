@@ -24,6 +24,8 @@ export function VehicleTopDown({
       style={{
         filter: isSelected
           ? 'drop-shadow(0 0 6px rgba(243, 244, 86, 0.75))'
+          : isReserved
+          ? 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 2px rgba(0, 0, 0, 1))'
           : 'drop-shadow(0 3px 5px rgba(0, 0, 0, 0.5))',
         transition: 'transform 0.2s ease, filter 0.2s ease',
         transform: isSelected ? 'scale(1.04)' : 'scale(1)'

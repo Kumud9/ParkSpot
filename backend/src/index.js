@@ -38,10 +38,7 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
 }
 
-// Global API rate limiter
-app.use('/api', globalLimiter);
-
-// Liveness Health Check
+// Liveness Health Check (exempt from rate limits)
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -78,6 +75,9 @@ app.get('/api/health/ready', async (_req, res) => {
     });
   }
 });
+
+// Global API rate limiter
+app.use('/api', globalLimiter);
 
 // Mount Legacy/Backward-compatible routes for existing client
 app.use('/api/auth', authRoutes);

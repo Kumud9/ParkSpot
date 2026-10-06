@@ -47,6 +47,8 @@ async function seed() {
       name: 'ParkSpot Legacy Admin',
       email: 'admin@parkspot.local',
       passwordHash: legacyAdminPasswordHash,
+      accountType: 'OPERATOR',
+      internalRole: 'ADMIN',
       role: 'ADMIN',
       organizationId: urbanPark._id
     },
@@ -54,6 +56,8 @@ async function seed() {
       name: 'UrbanPark Executive Owner',
       email: 'owner@urbanpark.test',
       passwordHash: devPasswordHash,
+      accountType: 'OPERATOR',
+      internalRole: 'OWNER',
       role: 'OWNER',
       organizationId: urbanPark._id
     },
@@ -61,6 +65,8 @@ async function seed() {
       name: 'UrbanPark Operations Admin',
       email: 'admin@urbanpark.test',
       passwordHash: devPasswordHash,
+      accountType: 'OPERATOR',
+      internalRole: 'ADMIN',
       role: 'ADMIN',
       organizationId: urbanPark._id
     },
@@ -68,6 +74,8 @@ async function seed() {
       name: 'UrbanPark Shift Manager',
       email: 'manager@urbanpark.test',
       passwordHash: devPasswordHash,
+      accountType: 'OPERATOR',
+      internalRole: 'MANAGER',
       role: 'MANAGER',
       organizationId: urbanPark._id
     },
@@ -75,6 +83,8 @@ async function seed() {
       name: 'UrbanPark Operations Staff',
       email: 'operator@urbanpark.test',
       passwordHash: devPasswordHash,
+      accountType: 'OPERATOR',
+      internalRole: 'OPERATOR',
       role: 'OPERATOR',
       organizationId: urbanPark._id
     },
@@ -82,6 +92,8 @@ async function seed() {
       name: 'Priya Sharma (Driver)',
       email: 'user@parkspot.test',
       passwordHash: devPasswordHash,
+      accountType: 'DRIVER',
+      internalRole: null,
       role: 'USER',
       organizationId: null
     }
@@ -98,8 +110,9 @@ async function seed() {
   }
   console.log(`Seeded ${Object.keys(createdUsers).length} users with B2B & consumer roles.`);
 
-  // 3. Create Facilities (Parking Lots)
+  // 3. Create Facilities (Parking Lots) with Real Geographic Coordinates
   const facilitiesData = [
+    // Delhi & NCR Facilities
     {
       name: 'Central Business District Parking',
       address: '14 Connaught Place',
@@ -110,6 +123,8 @@ async function seed() {
       openingTime: '00:00',
       closingTime: '23:59',
       active: true,
+      latitude: 28.6315,
+      longitude: 77.2167,
       organizationId: urbanPark._id
     },
     {
@@ -122,6 +137,8 @@ async function seed() {
       openingTime: '09:00',
       closingTime: '23:00',
       active: true,
+      latitude: 28.5677,
+      longitude: 77.3259,
       organizationId: urbanPark._id
     },
     {
@@ -134,6 +151,8 @@ async function seed() {
       openingTime: '00:00',
       closingTime: '23:59',
       active: true,
+      latitude: 28.5494,
+      longitude: 77.1212,
       organizationId: urbanPark._id
     },
     {
@@ -146,12 +165,144 @@ async function seed() {
       openingTime: '05:00',
       closingTime: '00:00',
       active: true,
+      latitude: 28.6290,
+      longitude: 77.2285,
+      organizationId: urbanPark._id
+    },
+    // Ahmedabad Facilities (Near Ahmedabad Airport & Riverfront)
+    {
+      name: 'Riverside Airport Parking',
+      address: 'Airport Circle, Hansol',
+      city: 'Ahmedabad',
+      description: 'Covered premier airport parking with 24/7 security and shuttle transfer.',
+      hourlyRate: 40,
+      dailyRate: 280,
+      openingTime: '00:00',
+      closingTime: '23:59',
+      active: true,
+      latitude: 23.0765,
+      longitude: 72.6240,
+      organizationId: urbanPark._id
+    },
+    {
+      name: 'Airport Terminal P1 Hub',
+      address: 'Terminal 1 Approach Road, Hansol',
+      city: 'Ahmedabad',
+      description: 'Direct pedestrian access to departure gates with EV fast charging.',
+      hourlyRate: 50,
+      dailyRate: 350,
+      openingTime: '00:00',
+      closingTime: '23:59',
+      active: true,
+      latitude: 23.0715,
+      longitude: 72.6285,
+      organizationId: urbanPark._id
+    },
+    {
+      name: 'Riverfront Promenade Deck',
+      address: 'West Riverfront Road, Navrangpura',
+      city: 'Ahmedabad',
+      description: 'Spacious waterfront parking with park connectivity and automated boom barriers.',
+      hourlyRate: 30,
+      dailyRate: 200,
+      openingTime: '06:00',
+      closingTime: '23:00',
+      active: true,
+      latitude: 23.0375,
+      longitude: 72.5714,
+      organizationId: urbanPark._id
+    },
+    // Vadodara Facilities (Near Railway Station, Sayajigunj, Parul University & Manjalpur)
+    {
+      name: 'Sayajigunj Station Plaza',
+      address: 'Station Road, Sayajigunj',
+      city: 'Vadodara',
+      description: 'Adjacent to Vadodara Central Junction with express digital check-in.',
+      hourlyRate: 35,
+      dailyRate: 240,
+      openingTime: '00:00',
+      closingTime: '23:59',
+      active: true,
+      latitude: 22.3120,
+      longitude: 73.1830,
+      organizationId: urbanPark._id
+    },
+    {
+      name: 'Alkapuri Commercial Hub',
+      address: 'RC Dutt Road, Alkapuri',
+      city: 'Vadodara',
+      description: 'Multi-level corporate park with dedicated EV charging and accessible bays.',
+      hourlyRate: 45,
+      dailyRate: 300,
+      openingTime: '07:00',
+      closingTime: '23:30',
+      active: true,
+      latitude: 22.3142,
+      longitude: 73.1740,
+      organizationId: urbanPark._id
+    },
+    {
+      name: 'Parul Campus Mobility Hub',
+      address: 'Parul University Gate 1, Limda, Waghodia',
+      city: 'Vadodara',
+      description: 'Designated campus parking for students, faculty and visitors.',
+      hourlyRate: 20,
+      dailyRate: 120,
+      openingTime: '07:00',
+      closingTime: '22:00',
+      active: true,
+      latitude: 22.2895,
+      longitude: 73.3648,
+      organizationId: urbanPark._id
+    },
+    {
+      name: 'Waghodia Crossroad Mobility Lot',
+      address: 'Waghodia Main Road, Limda',
+      city: 'Vadodara',
+      description: 'Convenient transit parking serving Waghodia corridor and Parul institutes.',
+      hourlyRate: 25,
+      dailyRate: 150,
+      openingTime: '06:00',
+      closingTime: '23:00',
+      active: true,
+      latitude: 22.2980,
+      longitude: 73.3520,
+      organizationId: urbanPark._id
+    },
+    {
+      name: 'Manjalpur Sports Complex Bay',
+      address: 'Darbar Ring Road, Manjalpur',
+      city: 'Vadodara',
+      description: 'Secure open & covered bays adjacent to sports complex and residential zone.',
+      hourlyRate: 30,
+      dailyRate: 180,
+      openingTime: '05:30',
+      closingTime: '23:00',
+      active: true,
+      latitude: 22.2698,
+      longitude: 73.1955,
       organizationId: urbanPark._id
     }
   ];
 
+  // Cleanup any legacy malformed location objects before upserting
+  try {
+    await ParkingLot.collection.updateMany(
+      { 'location.coordinates': { $exists: false } },
+      { $unset: { location: '' } }
+    );
+  } catch (cleanErr) {
+    // Ignore if collection doesn't exist yet
+  }
+
   const seededFacilities = [];
   for (const facData of facilitiesData) {
+    if (typeof facData.latitude === 'number' && typeof facData.longitude === 'number') {
+      facData.location = {
+        type: 'Point',
+        coordinates: [facData.longitude, facData.latitude]
+      };
+    }
     const facility = await ParkingLot.findOneAndUpdate(
       { name: facData.name, city: facData.city },
       facData,
@@ -181,6 +332,20 @@ async function seed() {
           const slotNum = `${floor.floorNumber === 0 ? 'G' : `L${floor.floorNumber}`}-${String(i).padStart(2, '0')}`;
           const type = i % 6 === 0 ? 'EV' : i % 9 === 0 ? 'ACCESSIBLE' : i % 4 === 0 ? 'COMPACT' : 'STANDARD';
 
+          // Realistic operational distribution across each floor:
+          // - Parked cars (OCCUPIED): slots 2, 5, 7, 11
+          // - Active reservations (RESERVED): slots 4, 9
+          // - Maintenance inspection (MAINTENANCE): slot 12
+          // - Open bays ready for driver reservation (AVAILABLE): slots 1, 3, 6, 8, 10
+          let slotStatus = 'AVAILABLE';
+          if (i === 2 || i === 5 || i === 7 || i === 11) {
+            slotStatus = 'OCCUPIED';
+          } else if (i === 4 || i === 9) {
+            slotStatus = 'RESERVED';
+          } else if (i === 12) {
+            slotStatus = 'MAINTENANCE';
+          }
+
           slotsToInsert.push({
             lotId: facility._id,
             floorId: floor._id,
@@ -188,7 +353,7 @@ async function seed() {
             number: slotNum,
             level: floor.name,
             type,
-            status: 'AVAILABLE',
+            status: slotStatus,
             isActive: true,
             coordinates: {
               x: (i % 6) * 3.0,

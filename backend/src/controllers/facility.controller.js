@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const facilityService = require('../services/facility.service');
 const occupancyService = require('../services/occupancy.service');
+const locationService = require('../services/location.service');
 const { AppError } = require('../errors');
 
 const windowSchema = z.object({
@@ -28,8 +29,39 @@ const lotSchema = z.object({
   dailyRate: z.coerce.number().positive(),
   openingTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default('00:00'),
   closingTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default('23:59'),
-  active: z.boolean().optional()
+  active: z.boolean().optional(),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional()
 });
+
+const nearbyQuerySchema = z.object({
+  lat: z.coerce.number().min(-90).max(90),
+  lng: z.coerce.number().min(-180).max(180),
+  radius: z.coerce.number().positive().max(100).default(3),
+  sortBy: z.enum(['recommended', 'nearest', 'price', 'availability']).default('recommended'),
+  parkingType: z.enum(['STANDARD', 'COMPACT', 'EV', 'ACCESSIBLE', 'ALL']).optional(),
+  minAvailable: z.coerce.number().int().min(0).optional(),
+  maxPrice: z.coerce.number().positive().optional()
+});
+
+// Nearby facility discovery by coordinates
+async function getNearby(req, res, next) {
+  try {
+    const query = nearbyQuerySchema.parse(req.query);
+    const result = await locationService.findNearbyFacilities({
+      lat: query.lat,
+      lng: query.lng,
+      radiusKm: query.radius,
+      sortBy: query.sortBy,
+      parkingType: query.parkingType,
+      minAvailable: query.minAvailable,
+      maxPrice: query.maxPrice
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
 
 // Public endpoints (Used by existing frontend /api/lots and /api/v1/facilities/search)
 async function listPublic(req, res, next) {
@@ -150,6 +182,7 @@ async function ingestEvent(req, res, next) {
 }
 
 module.exports = {
+  getNearby,
   listPublic,
   getPublicById,
   listTenant,
@@ -158,3 +191,4 @@ module.exports = {
   getOccupancy,
   ingestEvent
 };
+

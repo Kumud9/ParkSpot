@@ -21,6 +21,8 @@ test('auth: registration, login, and B2B role credentials verification', async (
   assert.ok(regResult.token, 'Registration must return a JWT');
   assert.equal(regResult.user.email, email);
   assert.equal(regResult.user.role, 'USER');
+  assert.equal(regResult.user.accountType, 'DRIVER');
+  assert.equal(regResult.user.internalRole, null);
 
   // 2. Reject duplicate email registration
   await assert.rejects(
@@ -45,6 +47,8 @@ test('auth: registration, login, and B2B role credentials verification', async (
   });
   assert.ok(loginResult.token, 'Login must return a JWT');
   assert.equal(loginResult.user.email, email);
+  assert.equal(loginResult.user.accountType, 'DRIVER');
+  assert.equal(loginResult.user.internalRole, null);
 
   // 4. Reject login with invalid password
   await assert.rejects(
@@ -61,18 +65,27 @@ test('auth: registration, login, and B2B role credentials verification', async (
     }
   );
 
-  // 5. Register B2B Owner with Organization
+  // 5. Register Operator with Organization
   const b2bEmail = `b2bowner-${Date.now()}@test.com`;
   const b2bResult = await authService.register({
     name: 'B2B Owner User',
     email: b2bEmail,
     password: 'Password@123',
-    organizationName: 'Global Parking Corp',
-    role: 'OWNER'
+    accountType: 'OPERATOR',
+    organizationName: 'Global Parking Corp'
   });
 
-  assert.equal(b2bResult.user.role, 'OWNER');
-  assert.ok(b2bResult.user.organizationId, 'B2B owner must be linked to an organization');
+  assert.equal(b2bResult.user.accountType, 'OPERATOR');
+  assert.equal(b2bResult.user.internalRole, 'OWNER');
+  assert.ok(b2bResult.user.organizationId, 'Operator must be linked to an organization');
+
+  // Verify login as Operator returns authoritative accountType and internalRole
+  const b2bLogin = await authService.login({
+    email: b2bEmail,
+    password: 'Password@123'
+  });
+  assert.equal(b2bLogin.user.accountType, 'OPERATOR');
+  assert.equal(b2bLogin.user.internalRole, 'OWNER');
 
   // Cleanup
   await User.deleteMany({ email: { $in: [email, b2bEmail] } });

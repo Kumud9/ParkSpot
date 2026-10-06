@@ -18,7 +18,9 @@ export function ParkingMap({
   spots = [],
   selectedSpotId = null,
   onSelectSpot,
-  isOperator = false
+  isOperator = false,
+  currentUserId = null,
+  userBookings = []
 }) {
   // Partition spots into logical parking rows (A, B, C, D)
   const hasLetterRows = spots.some((s) => /^[A-D]/i.test(s.number));
@@ -49,7 +51,7 @@ export function ParkingMap({
   const renderBay = (spot, index) => {
     const isSelected = selectedSpotId === spot.id;
     const isOccupied = spot.status === 'OCCUPIED';
-    const isReserved = spot.status === 'RESERVED';
+    const isReserved = spot.status === 'RESERVED' || spot.status === 'BOOKED';
     const isAvailable = spot.status === 'AVAILABLE';
     const isMaintenance = spot.status === 'MAINTENANCE';
     const isBlocked = spot.status === 'BLOCKED';
@@ -57,40 +59,53 @@ export function ParkingMap({
     // Consistent pseudo-random car color based on spot index
     const carColor = CAR_PALETTE[index % CAR_PALETTE.length];
 
+    // Check if reservation belongs to the active user
+    const isMyBooking = Boolean(
+      spot.isMyBooking ||
+      (currentUserId && (spot.userId === currentUserId || spot.bookedBy === currentUserId || spot.bookingInfo?.userId === currentUserId)) ||
+      (userBookings && userBookings.some((b) => (b.slotId === spot.id || b.slot?.id === spot.id || b.spotId === spot.id) && (b.status === 'CONFIRMED' || b.status === 'ACTIVE' || b.status === 'PENDING_PAYMENT')))
+    );
+
     let bayClass = 'parking-bay';
     if (isSelected) bayClass += ' selected';
+    else if (isReserved) bayClass += ` reserved ${isMyBooking ? 'my-booking' : ''}`;
     else if (isOccupied) bayClass += ' occupied';
-    else if (isReserved) bayClass += ' reserved';
     else if (isMaintenance) bayClass += ' maintenance';
     else if (isBlocked) bayClass += ' blocked';
+
+    const handleBayClick = () => {
+      if (!isAvailable && !isOperator) {
+        return;
+      }
+      onSelectSpot && onSelectSpot(spot);
+    };
 
     return (
       <div
         key={spot.id}
         className={bayClass}
-        onClick={() => {
-          if (isAvailable || isOperator || isSelected) {
-            onSelectSpot && onSelectSpot(spot);
-          }
-        }}
+        onClick={handleBayClick}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            if (isAvailable || isOperator || isSelected) {
-              onSelectSpot && onSelectSpot(spot);
-            }
+            handleBayClick();
           }
         }}
         role="button"
         tabIndex={isAvailable || isOperator ? 0 : -1}
         aria-pressed={isSelected}
         aria-disabled={!isAvailable && !isOperator}
-        aria-label={`Parking Spot ${spot.number}, ${spot.status}, ${spot.floor || activeFloor}, ${spot.type || 'Standard'} bay${spot.rate ? `, ₹${spot.rate} per hour` : ''}`}
-        title={`Spot ${spot.number} — ${spot.status}`}
+        aria-label={`Parking Spot ${spot.number}, ${isReserved ? (isMyBooking ? 'Your Booking' : 'Reserved') : spot.status}, ${spot.floor || activeFloor}, ${spot.type || 'Standard'} bay${spot.rate ? `, ₹${spot.rate} per hour` : ''}`}
+        title={isMyBooking ? `Spot ${spot.number} — Your booking (Reserved)` : isReserved ? `Spot ${spot.number} — Parking Spot Reserved` : isOccupied ? `Spot ${spot.number} — Parking Spot Already Occupied` : !isAvailable ? `Spot ${spot.number} — ${spot.status}` : `Spot ${spot.number} — Available`}
       >
         <div className="bay-header">
           <span className="bay-id">{spot.number}</span>
-          {spot.type && spot.type !== 'STANDARD' && (
+          {isReserved && (
+            <span className={`bay-status-badge reserved-badge ${isMyBooking ? 'my-booking' : ''}`}>
+              {isMyBooking ? 'YOURS' : 'RESERVED'}
+            </span>
+          )}
+          {spot.type && spot.type !== 'STANDARD' && !isReserved && (
             <span style={{ fontSize: '0.625rem', color: 'var(--ps-accent-light)' }}>
               {spot.type === 'EV' ? '⚡EV' : '♿ACC'}
             </span>
@@ -110,9 +125,9 @@ export function ParkingMap({
             <VehicleTopDown color={carColor} isReserved={false} />
           )}
 
-          {/* RESERVED: Top-down car with subtle reservation beacon */}
+          {/* RESERVED: Top-down car resting over black & diagonal neon yellow-green stripes */}
           {isReserved && !isSelected && (
-            <VehicleTopDown color="#544D3F" isReserved={true} />
+            <VehicleTopDown color="#23272F" roofColor="#191B20" isReserved={true} />
           )}
 
           {/* SELECTED: High-contrast yellow accent car */}
@@ -171,7 +186,7 @@ export function ParkingMap({
             <span>Occupied</span>
           </div>
           <div className="legend-item">
-            <span className="legend-dot" style={{ backgroundColor: 'var(--ps-state-reserved)' }}></span>
+            <span className="legend-dot legend-reserved-stripe"></span>
             <span>Reserved</span>
           </div>
           <div className="legend-item">

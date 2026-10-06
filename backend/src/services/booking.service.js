@@ -115,7 +115,7 @@ async function createBooking({
       const conflict = await conflictQuery;
 
       if (conflict) {
-        throw new AppError(409, 'SLOT_UNAVAILABLE', 'This parking slot is no longer available for that time range.');
+        throw new AppError(409, 'SPOT_ALREADY_BOOKED', 'This parking spot was just booked by another driver.');
       }
 
       // Fetch pricing rules for facility
@@ -150,6 +150,11 @@ async function createBooking({
       );
 
       const booking = bookingDocs[0];
+
+      // Update spot status in ParkingSlot
+      const slotUpdate = ParkingSlot.findByIdAndUpdate(slot._id, { status: 'RESERVED' });
+      if (session) slotUpdate.session(session);
+      await slotUpdate;
 
       if (useTransaction && session) {
         await session.commitTransaction();
@@ -216,6 +221,18 @@ async function cancelBooking({ bookingId, userId, organizationId = null, ipAddre
   booking.status = 'CANCELED';
   await booking.save();
 
+  // Restore slot status to AVAILABLE if no other active booking/hold exists
+  const hasOther = await Booking.exists({
+    slotId: booking.slotId,
+    _id: { $ne: booking._id },
+    status: { $in: ['CONFIRMED', 'PENDING_PAYMENT'] },
+    startTime: { $lt: new Date(Date.now() + 24 * 3600000) },
+    endTime: { $gt: new Date() }
+  });
+  if (!hasOther) {
+    await ParkingSlot.findByIdAndUpdate(booking.slotId, { status: 'AVAILABLE' });
+  }
+
   await recordEvent({
     organizationId: booking.organizationId,
     facilityId: booking.lotId,
@@ -256,6 +273,17 @@ async function completeExpiredBookings() {
     );
 
     for (const b of expiredBookings) {
+      // Check if slot has any other ongoing bookings
+      const hasOther = await Booking.exists({
+        slotId: b.slotId,
+        status: { $in: ['CONFIRMED', 'PENDING_PAYMENT'] },
+        startTime: { $lte: now },
+        endTime: { $gt: now }
+      });
+      if (!hasOther) {
+        await ParkingSlot.findByIdAndUpdate(b.slotId, { status: 'AVAILABLE' });
+      }
+
       await recordEvent({
         organizationId: b.organizationId,
         facilityId: b.lotId,
@@ -271,16 +299,31 @@ async function completeExpiredBookings() {
 
   // Also cancel stale PENDING_PAYMENT bookings older than 15 minutes or past start time
   const staleThreshold = new Date(now.getTime() - 15 * 60 * 1000);
-  await Booking.updateMany(
-    {
-      status: 'PENDING_PAYMENT',
-      $or: [
-        { createdAt: { $lte: staleThreshold } },
-        { startTime: { $lte: now } }
-      ]
-    },
-    { $set: { status: 'CANCELED' } }
-  );
+  const staleHolds = await Booking.find({
+    status: 'PENDING_PAYMENT',
+    $or: [
+      { createdAt: { $lte: staleThreshold } },
+      { startTime: { $lte: now } }
+    ]
+  }).lean();
+
+  if (staleHolds.length > 0) {
+    await Booking.updateMany(
+      { _id: { $in: staleHolds.map((h) => h._id) } },
+      { $set: { status: 'CANCELED' } }
+    );
+
+    for (const h of staleHolds) {
+      const hasOther = await Booking.exists({
+        slotId: h.slotId,
+        status: { $in: ['CONFIRMED', 'PENDING_PAYMENT'] },
+        endTime: { $gt: now }
+      });
+      if (!hasOther) {
+        await ParkingSlot.findByIdAndUpdate(h.slotId, { status: 'AVAILABLE' });
+      }
+    }
+  }
 
   return expiredBookings.length;
 }

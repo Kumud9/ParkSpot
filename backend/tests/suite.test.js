@@ -24,3 +24,6 @@ require('./analytics.test');
 require('./optimization.test');
 require('./phase3_1.test');
 require('./phase3_2.test');
+require('./phase4_4.test');
+require('./rbac_account_model.test');
+

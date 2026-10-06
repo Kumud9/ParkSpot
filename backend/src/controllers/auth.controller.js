@@ -3,13 +3,18 @@ const authService = require('../services/auth.service');
 
 const credentialsSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8).max(72)
+  password: z.string().min(1).max(72),
+  accountType: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() ? v.trim().toUpperCase() : undefined),
+    z.enum(['DRIVER', 'OPERATOR']).optional()
+  )
 });
 
 const registerSchema = credentialsSchema.extend({
   name: z.string().trim().min(2).max(80),
+  accountType: z.enum(['DRIVER', 'OPERATOR', 'driver', 'operator']).optional(),
   organizationName: z.string().trim().min(2).max(100).optional(),
-  role: z.enum(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR', 'USER']).optional()
+  role: z.enum(['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR', 'USER', 'DRIVER', 'driver', 'operator']).optional()
 });
 
 async function register(req, res, next) {
