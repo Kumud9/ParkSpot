@@ -75,10 +75,11 @@ test('PARKSPOT RBAC: Public Account Model (DRIVER / OPERATOR) & Route Enforcemen
     }
     if (testFacility?._id) {
       await ParkingLot.deleteOne({ _id: testFacility._id });
-      await ParkingSlot.deleteMany({ lotId: testFacility._id });
       await Booking.deleteMany({ lotId: testFacility._id });
     }
-    await mongoose.disconnect();
+    if (process.argv[1] && process.argv[1].includes('rbac_account_model.test.js')) {
+      await mongoose.disconnect();
+    }
   });
 
   // 1. DRIVER SIGNUP & LOGIN

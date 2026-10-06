@@ -356,6 +356,75 @@ export const api = {
   },
 
   /**
+   * Driver: Get single booking
+   */
+  async getBooking(bookingId) {
+    api.requireToken();
+    const data = await request(`/bookings/${bookingId}`);
+    return data.booking;
+  },
+
+  /**
+   * Driver: List user vehicles
+   */
+  async getVehicles() {
+    const token = authStorage.getToken();
+    if (!token) return [];
+    try {
+      const data = await request('/v1/vehicles');
+      return data.vehicles || [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Driver: Create vehicle
+   */
+  async createVehicle(payload) {
+    api.requireToken();
+    const data = await request('/v1/vehicles', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    return data.vehicle;
+  },
+
+  /**
+   * Driver: Update vehicle
+   */
+  async updateVehicle(vehicleId, payload) {
+    api.requireToken();
+    const data = await request(`/v1/vehicles/${vehicleId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+    return data.vehicle;
+  },
+
+  /**
+   * Driver: Delete vehicle
+   */
+  async deleteVehicle(vehicleId) {
+    api.requireToken();
+    const data = await request(`/v1/vehicles/${vehicleId}`, {
+      method: 'DELETE'
+    });
+    return data;
+  },
+
+  /**
+   * Driver: Set default vehicle
+   */
+  async setDefaultVehicle(vehicleId) {
+    api.requireToken();
+    const data = await request(`/v1/vehicles/${vehicleId}/default`, {
+      method: 'PATCH'
+    });
+    return data.vehicle;
+  },
+
+  /**
    * Payment: Create payment order for a booking
    */
   async createPaymentOrder(bookingId) {

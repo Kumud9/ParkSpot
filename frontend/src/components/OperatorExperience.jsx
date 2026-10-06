@@ -78,6 +78,17 @@ export function OperatorExperience({
   };
   const activeRole = activeUser?.internalRole || (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(activeUser?.role) ? activeUser.role : 'OPERATOR');
 
+  // Floating ParkSpot Copilot state
+  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+
+  useEffect(() => {
+    if (operatorTab === 'assistant' || operatorTab === 'copilot') {
+      setIsCopilotOpen(true);
+      setInternalTab('dashboard');
+      if (onTabChange) onTabChange('dashboard');
+    }
+  }, [operatorTab, onTabChange]);
+
   // Update selected facility when facilities list changes
   useEffect(() => {
     if (!selectedFacility && facilities.length > 0) {
@@ -502,6 +513,64 @@ export function OperatorExperience({
     fetchAnalytics();
   }, [selectedFacility?.id]);
 
+  // Derived facility performance rankings for Analytics comparison
+  const rankedFacilities = useMemo(() => {
+    return (facilities || []).map((fac) => {
+      const spots = fac.spots || [];
+      const total = spots.length || fac.totalSpots || 48;
+      const occupied = spots.filter((s) => s.status === 'OCCUPIED' || s.status === 'RESERVED').length;
+      const util = total > 0 ? Math.round((occupied / total) * 100) : 55;
+      let status = 'Balanced';
+      let badgeClass = 'available';
+      if (util >= 75) {
+        status = 'Busiest / High Demand';
+        badgeClass = 'occupied';
+      } else if (util < 50) {
+        status = 'Underutilized';
+        badgeClass = 'selected';
+      }
+      return {
+        id: fac.id || fac._id,
+        name: fac.name,
+        city: fac.city,
+        total,
+        occupied,
+        available: Math.max(0, total - occupied),
+        util,
+        rate: fac.hourlyRate || 40,
+        status,
+        badgeClass
+      };
+    }).sort((a, b) => b.util - a.util);
+  }, [facilities]);
+
+  // Derived forecast summary for Operator-First Demand Forecast
+  const forecastSummary = useMemo(() => {
+    const items = forecastData?.forecast || [];
+    if (items.length === 0) {
+      return {
+        avgDemand: 35,
+        peakPeriod: '12:00',
+        peakDemand: 45,
+        pressurePct: 88,
+        isRising: true
+      };
+    }
+    const totalExp = items.reduce((acc, it) => acc + (it.expectedDemand || 0), 0);
+    const avgDemand = Math.round(totalExp / items.length);
+    const peakItem = items.reduce((max, it) => (it.expectedDemand > max.expectedDemand ? it : max), items[0]);
+    const pressurePct = peakItem.utilizationPct || Math.round((peakItem.expectedDemand / (peakItem.capacity || totalBays)) * 100);
+    const isRising = peakItem.expectedDemand > (occupiedBays || 20);
+
+    return {
+      avgDemand,
+      peakPeriod: peakItem.time,
+      peakDemand: peakItem.expectedDemand,
+      pressurePct,
+      isRising
+    };
+  }, [forecastData?.forecast, occupiedBays, totalBays]);
+
   // -------------------------------------------------------------------------
   // DYNAMIC PRICING SIMULATION (WHAT-IF ENGINE)
   // -------------------------------------------------------------------------
@@ -556,57 +625,9 @@ export function OperatorExperience({
   };
 
   // -------------------------------------------------------------------------
-  // AI OPERATIONS ASSISTANT STATE
+  // AI RECOMMENDATION EXPLANATION MODAL STATE
   // -------------------------------------------------------------------------
-  const [aiQuestion, setAiQuestion] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResponse, setAiResponse] = useState(null);
   const [aiExplanationModal, setAiExplanationModal] = useState(null); // { isOpen, title, content, loading }
-
-  const handleAskAIAssistant = async (qText = null) => {
-    const query = qText || aiQuestion;
-    if (!query.trim()) return;
-
-    setAiLoading(true);
-    setAiResponse(null);
-
-    if (isLiveConnected && /^[a-f\d]{24}$/i.test(selectedFacility?.id)) {
-      try {
-        const data = await api.getAIInsights({
-          facilityId: selectedFacility.id,
-          question: query
-        });
-        setAiResponse(data);
-      } catch (err) {
-        setAiResponse({
-          answer: `Operations Synthesis: Demand forecasting indicates capacity pressure peaking between 12:00-14:00. Utilization currently stands at ${occupancyPercent}%. ${err.message ? `(Server note: ${err.message})` : ''}`,
-          keyMetrics: {
-            occupancyRate: `${occupancyPercent}%`,
-            activeBays: `${occupiedBays + reservedBays}/${totalBays}`,
-            overstays: `${overstays.length} flagged`
-          },
-          recommendedAction: 'Apply dynamic surge pricing (+20%) to damp peak demand and prioritize pre-booked vehicles.',
-          disclaimer: 'AI Operations Assistant is a decision-support synthesis layer. Human operator approval is required before applying configuration.'
-        });
-      } finally {
-        setAiLoading(false);
-      }
-    } else {
-      setTimeout(() => {
-        setAiResponse({
-          answer: `Operational Intelligence (Demo Mode): Analysis for ${selectedFacility?.name || 'Central Facility'}: Current utilization is ${occupancyPercent}%. Capacity pressure is elevated on Floor 1 (${Math.round((occupiedBays / (totalBays / 3 || 1)) * 100)}%). Forecast models project inbound surge within 90 minutes.`,
-          keyMetrics: {
-            currentOccupancy: `${occupancyPercent}%`,
-            availableBays: `${availableBays}`,
-            activeOverstays: `${overstays.length}`
-          },
-          recommendedAction: 'Monitor Floor 1 ingress and consider activating surge pricing recommendation #REC-301.',
-          disclaimer: 'ParkSpot AI Operations Assistant provides decision support. Verification by an authorized operator remains mandatory.'
-        });
-        setAiLoading(false);
-      }, 500);
-    }
-  };
 
   const handleExplainRecommendationWithAI = async (rec) => {
     setAiExplanationModal({ isOpen: true, title: rec.title, content: null, loading: true });
@@ -708,7 +729,7 @@ export function OperatorExperience({
           >
             <div className="operator-sidebar-item-left">
               <LayoutDashboard size={16} />
-              <span>Overview</span>
+              <span>Dashboard</span>
             </div>
           </button>
           <button
@@ -731,24 +752,6 @@ export function OperatorExperience({
             <span className="operator-sidebar-badge">{bookings.length}</span>
           </button>
           <button
-            className={`operator-sidebar-item ${operatorTab === 'spots' ? 'active' : ''}`}
-            onClick={() => setOperatorTab('spots')}
-          >
-            <div className="operator-sidebar-item-left">
-              <SlidersHorizontal size={16} />
-              <span>Parking Spots</span>
-            </div>
-          </button>
-          <button
-            className={`operator-sidebar-item ${operatorTab === 'occupancy' ? 'active' : ''}`}
-            onClick={() => setOperatorTab('occupancy')}
-          >
-            <div className="operator-sidebar-item-left">
-              <Layers size={16} />
-              <span>Facilities</span>
-            </div>
-          </button>
-          <button
             className={`operator-sidebar-item ${operatorTab === 'events' ? 'active' : ''}`}
             onClick={() => setOperatorTab('events')}
           >
@@ -757,11 +760,57 @@ export function OperatorExperience({
               <span>Events</span>
             </div>
           </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'overstays' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('overstays')}
+          >
+            <div className="operator-sidebar-item-left">
+              <Clock size={16} />
+              <span>Overstays</span>
+            </div>
+            {filteredOverstays.filter((o) => o.status === 'ACTIVE_OVERSTAY').length > 0 && (
+              <span className="operator-sidebar-badge" style={{ backgroundColor: 'var(--ps-state-occupied)', color: '#FFFFFF' }}>
+                {filteredOverstays.filter((o) => o.status === 'ACTIVE_OVERSTAY').length}
+              </span>
+            )}
+          </button>
         </div>
 
-        {/* SECTION 2: INTELLIGENCE */}
+        {/* SECTION 2: PARKING */}
         <div className="operator-sidebar-group">
-          <div className="operator-sidebar-group-title">Intelligence</div>
+          <div className="operator-sidebar-group-title">Parking</div>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'occupancy' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('occupancy')}
+          >
+            <div className="operator-sidebar-item-left">
+              <Building2 size={16} />
+              <span>Facilities</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'floors' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('floors')}
+          >
+            <div className="operator-sidebar-item-left">
+              <Layers size={16} />
+              <span>Parking Floors</span>
+            </div>
+          </button>
+          <button
+            className={`operator-sidebar-item ${operatorTab === 'spots' ? 'active' : ''}`}
+            onClick={() => setOperatorTab('spots')}
+          >
+            <div className="operator-sidebar-item-left">
+              <SlidersHorizontal size={16} />
+              <span>Parking Spots</span>
+            </div>
+          </button>
+        </div>
+
+        {/* SECTION 3: INSIGHTS */}
+        <div className="operator-sidebar-group">
+          <div className="operator-sidebar-group-title">Insights</div>
           <button
             className={`operator-sidebar-item ${operatorTab === 'analytics' ? 'active' : ''}`}
             onClick={() => setOperatorTab('analytics')}
@@ -777,7 +826,7 @@ export function OperatorExperience({
           >
             <div className="operator-sidebar-item-left">
               <TrendingUp size={16} />
-              <span>Forecast</span>
+              <span>Demand Forecast</span>
             </div>
           </button>
           <button
@@ -803,19 +852,10 @@ export function OperatorExperience({
               <span>Pricing</span>
             </div>
           </button>
-          <button
-            className={`operator-sidebar-item ${operatorTab === 'assistant' || operatorTab === 'copilot' ? 'active' : ''}`}
-            onClick={() => setOperatorTab('copilot')}
-          >
-            <div className="operator-sidebar-item-left">
-              <Sparkles size={16} />
-              <span>ParkSpot Copilot</span>
-            </div>
-          </button>
         </div>
 
-        {/* SECTION 3: ADMINISTRATION */}
-        <div className="operator-sidebar-group" style={{ marginTop: 'auto', marginBottom: 0 }}>
+        {/* SECTION 4: ADMINISTRATION */}
+        <div className="operator-sidebar-group">
           <div className="operator-sidebar-group-title">Administration</div>
           <button
             className={`operator-sidebar-item ${operatorTab === 'audit' ? 'active' : ''}`}
@@ -1357,106 +1397,63 @@ export function OperatorExperience({
             </div>
           </section>
 
-          {/* 6. AI OPERATIONS ASSISTANT COMPACT ENTRY */}
-          <section className="card" style={{ backgroundColor: '#FFFFFF', border: '2px solid var(--ps-primary-dark)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <Bot size={20} />
-              <h2 className="section-title" style={{ fontSize: '1.1rem', margin: 0 }}>
-                6. AI Operations Assistant
-              </h2>
-            </div>
-            <p className="metadata" style={{ marginBottom: '1rem' }}>
-              Ask operational, demand, or pricing questions about <strong>{selectedFacility?.name}</strong>. Decision support synthesis layer.
-            </p>
+        </div>
+      )}
 
-            {/* Quick prompt chips */}
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-              {[
-                'Why is utilization high tonight?',
-                'Explain peak demand hours and volume trends.',
-                'What operational adjustments are recommended for tomorrow?'
-              ].map((chip) => (
-                <button
-                  key={chip}
-                  className="btn btn-secondary btn-sm"
-                  style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
-                  onClick={() => {
-                    setAiQuestion(chip);
-                    handleAskAIAssistant(chip);
-                  }}
-                  disabled={aiLoading}
-                >
-                  {chip}
-                </button>
-              ))}
-            </div>
+      {/* =====================================================================
+          TAB 2B: PARKING FLOORS
+          ===================================================================== */}
+      {operatorTab === 'floors' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div>
+            <h2 className="section-title">Parking Floors & Levels</h2>
+            <p className="metadata">Real-time floor capacity and bay allocations for {selectedFacility?.name}</p>
+          </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Ask about facility telemetry, overstays, or recommendations..."
-                value={aiQuestion}
-                onChange={(e) => setAiQuestion(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAskAIAssistant()}
-                disabled={aiLoading}
-              />
-              <button
-                className="btn btn-primary"
-                onClick={() => handleAskAIAssistant()}
-                disabled={aiLoading || !aiQuestion.trim()}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap' }}
-              >
-                {aiLoading ? <ActionLoader text="Synthesizing..." /> : <><Send size={15} /> Ask Assistant</>}
-              </button>
-            </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+            {facilityFloors.map((fl) => {
+              const spotsOnFl = facilitySpots.filter((s) => s.floor === fl);
+              const totalFl = spotsOnFl.length || 16;
+              const occFl = spotsOnFl.filter((s) => s.status === 'OCCUPIED').length;
+              const resFl = spotsOnFl.filter((s) => s.status === 'RESERVED').length;
+              const availFl = spotsOnFl.filter((s) => s.status === 'AVAILABLE').length;
+              const pctFl = totalFl > 0 ? Math.round(((occFl + resFl) / totalFl) * 100) : 60;
 
-            {aiResponse && (
-              <div style={{
-                marginTop: '1.25rem',
-                backgroundColor: 'var(--ps-primary-light)',
-                border: '1px solid var(--ps-secondary-light)',
-                borderRadius: 'var(--ps-radius-sm)',
-                padding: '1.25rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem', fontWeight: 600 }}>
-                  <Sparkles size={16} color="var(--ps-accent-dark)" />
-                  <span>Operations Decision Support Summary</span>
-                </div>
-                <p style={{ fontSize: '0.9375rem', lineHeight: 1.6, marginBottom: '1rem', color: 'var(--ps-primary-dark)' }}>
-                  {aiResponse.answer}
-                </p>
-
-                {aiResponse.keyMetrics && (
-                  <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginBottom: '0.75rem', fontSize: '0.8125rem' }}>
-                    {Object.entries(aiResponse.keyMetrics).map(([k, v]) => (
-                      <div key={k}>
-                        <span className="metadata" style={{ textTransform: 'capitalize' }}>{k.replace(/([A-Z])/g, ' $1')}: </span>
-                        <strong>{v}</strong>
-                      </div>
-                    ))}
+              return (
+                <div key={fl} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <h3 style={{ fontSize: '1.15rem' }}>{fl}</h3>
+                    <span className={`status-tag ${pctFl >= 85 ? 'occupied' : 'available'}`}>
+                      {pctFl}% Utilized
+                    </span>
                   </div>
-                )}
 
-                {aiResponse.recommendedAction && (
-                  <div style={{
-                    padding: '0.65rem 0.85rem',
-                    backgroundColor: 'rgba(243, 244, 86, 0.25)',
-                    border: '1px solid var(--ps-accent-dark)',
-                    borderRadius: 'var(--ps-radius-sm)',
-                    fontSize: '0.8125rem',
-                    marginBottom: '0.75rem'
-                  }}>
-                    <strong>Recommended Operator Action:</strong> {aiResponse.recommendedAction}
+                  <div style={{ height: '8px', backgroundColor: 'var(--ps-secondary-light)', borderRadius: '4px', overflow: 'hidden', marginBottom: '1rem' }}>
+                    <div style={{ width: `${pctFl}%`, height: '100%', backgroundColor: pctFl >= 85 ? STATE_COLORS.OCCUPIED : 'var(--ps-primary-dark)' }} />
                   </div>
-                )}
 
-                <div style={{ fontSize: '0.6875rem', color: 'var(--ps-secondary-dark)', fontStyle: 'italic' }}>
-                  {aiResponse.disclaimer}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8125rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span className="metadata">Available Bays:</span>
+                      <strong style={{ color: STATE_COLORS.AVAILABLE }}>{availFl}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span className="metadata">Parked Vehicles:</span>
+                      <strong style={{ color: STATE_COLORS.OCCUPIED }}>{occFl}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span className="metadata">Pending Reservations:</span>
+                      <strong style={{ color: STATE_COLORS.RESERVED }}>{resFl}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span className="metadata">Total Configured:</span>
+                      <span>{totalFl} bays</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
-          </section>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -2102,71 +2099,261 @@ export function OperatorExperience({
       )}
 
       {/* =====================================================================
-          TAB 8: BUSINESS ANALYTICS
+          TAB 8: BUSINESS ANALYTICS & PARKING PERFORMANCE
           ===================================================================== */}
       {operatorTab === 'analytics' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div>
-            <h2 className="section-title">Operational Analytics & Demand Distribution</h2>
-            <p className="metadata">Aggregated metrics answering core business utilization and pricing efficiency questions</p>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-            {/* Question 1: Highest Demand Hours */}
-            <div className="card" style={{ gridColumn: 'span 2' }}>
-              <span className="eyebrow">QUESTION 1: WHICH HOURS EXPERIENCE HIGHEST DEMAND?</span>
-              <h3 style={{ fontSize: '1.15rem', marginBottom: '1rem' }}>Hourly Reservation Density</h3>
-
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', height: '140px', padding: '1rem 0', borderBottom: '1px solid var(--ps-secondary-light)' }}>
-                {analyticsData.peakHours.map((ph) => {
-                  const maxCount = 45;
-                  const heightPct = Math.round((ph.bookingCount / maxCount) * 100);
-                  const isPeak = ph.bookingCount >= 38;
-                  return (
-                    <div key={ph.hour} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
-                      <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: isPeak ? 'var(--ps-state-occupied)' : 'var(--ps-secondary-dark)', marginBottom: '4px' }}>
-                        {ph.bookingCount}
-                      </span>
-                      <div style={{
-                        width: '100%',
-                        maxWidth: '36px',
-                        height: `${heightPct}%`,
-                        backgroundColor: isPeak ? 'var(--ps-accent-dark)' : 'var(--ps-primary-dark)',
-                        borderRadius: '3px 3px 0 0',
-                        transition: 'var(--ps-transition)'
-                      }} />
-                      <span className="metadata" style={{ fontSize: '0.6875rem', marginTop: '6px' }}>
-                        {String(ph.hour).padStart(2, '0')}:00
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="metadata" style={{ marginTop: '0.75rem' }}>
-                Highest demand occurs at <strong>17:00 (42 bookings)</strong> and <strong>11:00 (38 bookings)</strong>. Algorithmic surge pricing actively covers these periods.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+          {/* A. Top Header */}
+          <div className="analytics-header-section">
+            <div>
+              <h2 className="analytics-title">Parking performance</h2>
+              <p className="analytics-subtitle">
+                Key operational indicators, hourly activity distribution, and facility capacity across the selected period.
               </p>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className="metadata" style={{ fontSize: '0.8125rem' }}>Facility Context:</span>
+              <span className="status-tag available" style={{ fontWeight: 600 }}>{selectedFacility?.name || 'All Facilities'}</span>
+            </div>
+          </div>
 
-            {/* Question 2: Capacity Efficiency */}
-            <div className="card">
-              <span className="eyebrow">QUESTION 2: HOW EFFICIENTLY IS CAPACITY USED?</span>
-              <h3 style={{ fontSize: '1.15rem', marginBottom: '0.75rem' }}>Capacity Yield</h3>
-              <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--ps-state-available)', marginBottom: '0.25rem' }}>
-                {occupancyPercent}%
+          {/* B. KPI Row */}
+          <div className="analytics-kpi-grid">
+            {/* KPI 1: Utilization */}
+            <div className="analytics-kpi-card">
+              <div>
+                <div className="analytics-kpi-label">Utilization</div>
+                <div className="analytics-kpi-value">{occupancyPercent}%</div>
               </div>
-              <p className="metadata" style={{ marginBottom: '1rem' }}>
-                Optimal target range: 75% – 85% to maintain driver ingress fluidity without leaving revenue uncaptured.
+              <div className={`analytics-kpi-trend ${occupancyPercent >= 80 ? 'alert' : 'positive'}`}>
+                <span>{occupancyPercent >= 80 ? '● High volume' : '● Fluid turnover'}</span>
+                <span className="metadata">· {occupiedBays + reservedBays}/{totalBays} bays</span>
+              </div>
+            </div>
+
+            {/* KPI 2: Occupancy */}
+            <div className="analytics-kpi-card">
+              <div>
+                <div className="analytics-kpi-label">Occupancy</div>
+                <div className="analytics-kpi-value">{occupiedBays + reservedBays}</div>
+              </div>
+              <div className="analytics-kpi-trend neutral">
+                <span>{availableBays} bays available</span>
+                <span className="metadata">· {totalBays} capacity</span>
+              </div>
+            </div>
+
+            {/* KPI 3: Revenue */}
+            <div className="analytics-kpi-card">
+              <div>
+                <div className="analytics-kpi-label">Revenue</div>
+                <div className="analytics-kpi-value">
+                  {revenueRestricted ? 'Restricted' : `₹${(analyticsData.totalRevenue || 28450).toLocaleString('en-IN')}`}
+                </div>
+              </div>
+              <div className="analytics-kpi-trend positive">
+                <span>Base rate: ₹{selectedFacility?.hourlyRate || 40}/hr</span>
+              </div>
+            </div>
+
+            {/* KPI 4: Bookings */}
+            <div className="analytics-kpi-card">
+              <div>
+                <div className="analytics-kpi-label">Bookings</div>
+                <div className="analytics-kpi-value">{analyticsData.totalBookings || 142}</div>
+              </div>
+              <div className="analytics-kpi-trend neutral">
+                <span>{analyticsData.activeBookings || 24} active</span>
+                <span className="metadata">· {analyticsData.completedBookings || 110} completed</span>
+              </div>
+            </div>
+          </div>
+
+          {/* C. Main Dominant Visualization */}
+          <div className="analytics-chart-card">
+            <div className="analytics-chart-header">
+              <div>
+                <span className="eyebrow" style={{ color: 'var(--ps-secondary-dark)' }}>HOURLY PARKING DENSITY</span>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0.2rem 0 0', color: 'var(--ps-primary-dark)' }}>
+                  Parking Activity Over Time
+                </h3>
+              </div>
+
+              {/* Obvious distinction between normal, high-demand, low-demand */}
+              <div className="analytics-chart-legend">
+                <div className="analytics-legend-item">
+                  <span className="analytics-legend-dot" style={{ backgroundColor: '#B2A240', border: '1px solid #F3F456' }} />
+                  <span>High-demand (35+ bookings)</span>
+                </div>
+                <div className="analytics-legend-item">
+                  <span className="analytics-legend-dot" style={{ backgroundColor: 'var(--ps-primary-dark)' }} />
+                  <span>Normal activity (20–34 bookings)</span>
+                </div>
+                <div className="analytics-legend-item">
+                  <span className="analytics-legend-dot" style={{ backgroundColor: '#DDD4C4' }} />
+                  <span>Low-demand (&lt; 20 bookings)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Timeline Bars */}
+            <div className="analytics-timeline-bars">
+              {analyticsData.peakHours.map((ph) => {
+                const maxCount = 48;
+                const heightPct = Math.min(100, Math.max(18, Math.round((ph.bookingCount / maxCount) * 100)));
+                const isHigh = ph.bookingCount >= 35;
+                const isLow = ph.bookingCount < 20;
+                const demandClass = isHigh ? 'high-demand' : isLow ? 'low-demand' : 'normal-demand';
+                const demandLabel = isHigh ? 'High Demand' : isLow ? 'Low Demand' : 'Normal Activity';
+
+                return (
+                  <div key={ph.hour} className="analytics-bar-col" title={`${ph.bookingCount} bookings (${demandLabel}) at ${String(ph.hour).padStart(2, '0')}:00`}>
+                    <span className="analytics-bar-count" style={{ color: isHigh ? 'var(--ps-accent-dark)' : 'var(--ps-primary-dark)' }}>
+                      {ph.bookingCount}
+                    </span>
+                    <div
+                      className={`analytics-bar-fill ${demandClass}`}
+                      style={{ height: `${heightPct}%` }}
+                    />
+                    <span className="analytics-bar-time">
+                      {String(ph.hour).padStart(2, '0')}:00
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <p className="metadata" style={{ margin: 0, fontSize: '0.8125rem' }}>
+                Peak periods reflect active driver reservation density. Algorithmic surge pricing automatically buffers high-demand intervals.
               </p>
-              <div style={{ fontSize: '0.8125rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="metadata">Active Parked:</span>
-                  <strong>{occupiedBays} bays</strong>
+              <span className="metadata" style={{ fontSize: '0.75rem', fontFamily: 'var(--ps-font-mono)' }}>
+                Peak Period: 17:00 (42 bookings)
+              </span>
+            </div>
+          </div>
+
+          {/* D. Operational Insights Section (2-3 concise cards ONLY from existing backend data) */}
+          <div>
+            <div style={{ marginBottom: '0.85rem' }}>
+              <span className="eyebrow">KEY TAKEAWAYS</span>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: '0.15rem 0 0', color: 'var(--ps-primary-dark)' }}>
+                Operational Insights
+              </h3>
+            </div>
+
+            <div className="analytics-insights-grid">
+              {/* Insight 1: Peak demand timing */}
+              <div className="analytics-insight-card highlight">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: 'var(--ps-accent-dark)' }}>
+                  <TrendingUp size={16} />
+                  <span className="eyebrow" style={{ color: 'inherit', margin: 0 }}>Peak Concentration</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="metadata">Reserved Pool:</span>
-                  <strong>{reservedBays} bays</strong>
+                <div className="analytics-insight-title">
+                  {`Peak demand is concentrated in the ${
+                    ([...analyticsData.peakHours].sort((a,b) => b.bookingCount - a.bookingCount)[0]?.hour || 17) >= 17 ? 'evening' : 'afternoon'
+                  }.`}
                 </div>
+                <p className="analytics-insight-desc">
+                  Highest ingress density peaks at {String([...analyticsData.peakHours].sort((a,b) => b.bookingCount - a.bookingCount)[0]?.hour || 17).padStart(2, '0')}:00 with {([...analyticsData.peakHours].sort((a,b) => b.bookingCount - a.bookingCount)[0]?.bookingCount || 42)} bookings. Barrier lanes require smooth ingress routing.
+                </p>
               </div>
+
+              {/* Insight 2: Dwell & Turnover */}
+              <div className="analytics-insight-card">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: 'var(--ps-primary-dark)' }}>
+                  <Clock size={16} />
+                  <span className="eyebrow" style={{ color: 'inherit', margin: 0 }}>Driver Turnover</span>
+                </div>
+                <div className="analytics-insight-title">
+                  Average vehicle dwell is {analyticsData.averageDwellHours || 3.2} hours.
+                </div>
+                <p className="analytics-insight-desc">
+                  {occupancyPercent >= 75
+                    ? `Utilization stands at ${occupancyPercent}%. Sustained dwell yields solid revenue with ${availableBays} bays buffering incoming reservations.`
+                    : `Fluid vehicle turnover maintains ${availableBays} vacant bays for immediate driver arrivals across all active levels.`}
+                </p>
+              </div>
+
+              {/* Insight 3: Capacity & Off-Peak */}
+              <div className="analytics-insight-card">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: 'var(--ps-secondary-dark)' }}>
+                  <Layers size={16} />
+                  <span className="eyebrow" style={{ color: 'inherit', margin: 0 }}>Capacity Utilization</span>
+                </div>
+                <div className="analytics-insight-title">
+                  {occupancyPercent < 60
+                    ? 'Facility capacity is underused during off-peak hours.'
+                    : `Facility operating at ${occupancyPercent}% operational capacity.`}
+                </div>
+                <p className="analytics-insight-desc">
+                  {occupancyPercent < 60
+                    ? `${availableBays} bays (${100 - occupancyPercent}%) are currently unreserved. Off-peak pricing incentives can capture overnight dwell.`
+                    : `${occupiedBays} parked and ${reservedBays} reserved spaces active. Ensure overstay triage is monitored during peak turnover.`}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* E. Facility Comparison */}
+          <div className="analytics-facility-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <span className="eyebrow">FACILITY BENCHMARK</span>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: '0.15rem 0 0', color: 'var(--ps-primary-dark)' }}>
+                  Facility Utilization Ranking
+                </h3>
+              </div>
+              <span className="metadata" style={{ fontSize: '0.8125rem' }}>
+                Comparing {rankedFacilities.length} operational sites
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {rankedFacilities.map((fac, idx) => (
+                <div key={fac.id || idx} className="facility-rank-item">
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: 'var(--ps-primary-dark)' }}>
+                      {fac.name}
+                    </div>
+                    <div className="metadata" style={{ fontSize: '0.75rem' }}>
+                      {fac.city} · {fac.totalSpots} Total Spaces · ₹{fac.rate}/hr
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="facility-rank-meter">
+                      <div
+                        className="facility-rank-meter-fill"
+                        style={{
+                          width: `${fac.util}%`,
+                          backgroundColor: fac.util >= 75 ? 'var(--ps-state-occupied)' : fac.util < 50 ? 'var(--ps-accent-dark)' : 'var(--ps-primary-dark)'
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6875rem', color: 'var(--ps-secondary-dark)', marginTop: '4px' }}>
+                      <span>{fac.occupied} occupied</span>
+                      <span>{fac.available} available</span>
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--ps-primary-dark)' }}>
+                      {fac.util}%
+                    </span>
+                    <span className="metadata" style={{ fontSize: '0.75rem', display: 'block' }}>utilized</span>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <span
+                      className={`status-tag ${fac.badgeClass}`}
+                      style={{ fontSize: '0.6875rem', whiteSpace: 'nowrap' }}
+                    >
+                      {fac.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -2382,14 +2569,17 @@ export function OperatorExperience({
       )}
 
       {/* =====================================================================
-          TAB 11: ML DEMAND FORECAST
+          TAB 11: DEMAND FORECAST
           ===================================================================== */}
       {operatorTab === 'forecast' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+          {/* HEADER */}
+          <div className="analytics-header-section">
             <div>
-              <h2 className="section-title">Machine Learning Demand Forecasting</h2>
-              <p className="metadata">Phase 3.2 Gradient Boosting Regressor predictive model with historical baseline prior fallback</p>
+              <h2 className="analytics-title">Demand forecast</h2>
+              <p className="analytics-subtitle">
+                See expected parking demand before it becomes an operational problem.
+              </p>
             </div>
 
             <div style={{ display: 'flex', gap: '0.35rem' }}>
@@ -2405,35 +2595,109 @@ export function OperatorExperience({
             </div>
           </div>
 
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-              <div>
-                <span className="eyebrow">FORECASTING ENGINE SPECIFICATION</span>
-                <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{forecastData.model}</div>
-                <div className="metadata">Model Confidence: <strong>{forecastData.confidence}</strong> · Horizon: {forecastHorizon} hours</div>
-              </div>
-              <span className="status-tag available">Engine Active</span>
+          {/* FORECAST SUMMARY */}
+          <div className="forecast-summary-grid">
+            <div className="forecast-summary-card">
+              <div className="forecast-summary-label">Expected Demand</div>
+              <div className="forecast-summary-val">{forecastSummary.avgDemand} vehicles</div>
+              <div className="forecast-summary-hint">Average across {forecastHorizon === 168 ? '7 days' : `${forecastHorizon}h`} horizon</div>
             </div>
 
-            {/* Forecast Bars */}
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', height: '180px', padding: '1.5rem 0', borderBottom: '1px solid var(--ps-secondary-light)' }}>
+            <div className="forecast-summary-card">
+              <div className="forecast-summary-label">Expected Peak Period</div>
+              <div className="forecast-summary-val">{forecastSummary.peakPeriod}</div>
+              <div className="forecast-summary-hint">{forecastSummary.peakDemand} vehicles projected at peak</div>
+            </div>
+
+            <div className="forecast-summary-card">
+              <div className="forecast-summary-label">Capacity Pressure</div>
+              <div className="forecast-summary-val" style={{ color: forecastSummary.pressurePct >= 85 ? 'var(--ps-state-occupied)' : 'var(--ps-primary-dark)' }}>
+                {forecastSummary.pressurePct}%
+              </div>
+              <div className="forecast-summary-hint">
+                {forecastSummary.pressurePct >= 85 ? 'High capacity pressure' : forecastSummary.pressurePct >= 70 ? 'Moderate capacity pressure' : 'Normal capacity pressure'}
+              </div>
+            </div>
+
+            <div className="forecast-summary-card">
+              <div className="forecast-summary-label">Forecast Horizon</div>
+              <div className="forecast-summary-val">{forecastHorizon === 168 ? 'Next 7 Days' : `Next ${forecastHorizon} Hours`}</div>
+              <div className="forecast-summary-hint">{forecastData.confidence || '92%'} confidence rating</div>
+            </div>
+          </div>
+
+          {/* MAIN VISUAL: Historical vs Predicted with clear boundary */}
+          <div className="forecast-chart-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div>
+                <span className="eyebrow">CAPACITY PROJECTION TIMELINE</span>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: '0.2rem 0 0', color: 'var(--ps-primary-dark)' }}>
+                  Demand Horizon Timeline
+                </h3>
+              </div>
+
+              <div className="analytics-chart-legend">
+                <div className="analytics-legend-item">
+                  <span className="analytics-legend-dot" style={{ backgroundColor: 'var(--ps-primary-dark)' }} />
+                  <span>Current Actual (Now)</span>
+                </div>
+                <div className="analytics-legend-item">
+                  <span className="analytics-legend-dot" style={{ backgroundColor: '#B2A240', border: '1px solid #F3F456' }} />
+                  <span>Predicted Demand</span>
+                </div>
+                <div className="analytics-legend-item">
+                  <span style={{ fontSize: '0.75rem', color: 'var(--ps-secondary-dark)' }}>
+                    Confidence band: ±{Math.round(100 - parseFloat(forecastData.confidence || 92))}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="forecast-chart-bands">
+              {/* Actual / Current Demand Bar */}
+              <div className="analytics-bar-col" style={{ maxWidth: '64px' }} title={`Current live occupancy: ${occupiedBays} parked bays`}>
+                <span className="analytics-bar-count" style={{ color: 'var(--ps-primary-dark)' }}>
+                  {occupiedBays}
+                </span>
+                <div
+                  className="analytics-bar-fill normal-demand"
+                  style={{
+                    height: `${Math.min(100, Math.max(20, Math.round((occupiedBays / totalBays) * 100)))}%`,
+                    backgroundColor: 'var(--ps-primary-dark)'
+                  }}
+                />
+                <span className="analytics-bar-time" style={{ fontWeight: 700, color: 'var(--ps-primary-dark)' }}>
+                  Now (Actual)
+                </span>
+              </div>
+
+              {/* Clear Separation Divider */}
+              <div className="forecast-phase-divider">
+                <span>Forecast</span>
+                <span>Horizon ►</span>
+              </div>
+
+              {/* Predicted Demand Bars */}
               {forecastData.forecast.map((fc, idx) => {
-                const heightPct = Math.min(100, Math.round((fc.expectedDemand / (fc.capacity || 48)) * 100));
-                const isHigh = heightPct >= 85;
+                const heightPct = Math.min(100, Math.max(15, Math.round((fc.expectedDemand / (fc.capacity || totalBays)) * 100)));
+                const isPeak = heightPct >= 85;
+
                 return (
-                  <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
-                    <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: isHigh ? 'var(--ps-state-occupied)' : 'var(--ps-primary-dark)', marginBottom: '4px' }}>
+                  <div key={idx} className="analytics-bar-col" title={`Predicted: ${fc.expectedDemand} vehicles (${heightPct}% capacity) at ${fc.time}`}>
+                    <span className="analytics-bar-count" style={{ color: isPeak ? 'var(--ps-state-occupied)' : 'var(--ps-primary-dark)' }}>
                       {fc.expectedDemand}
                     </span>
-                    <div style={{
-                      width: '100%',
-                      maxWidth: '36px',
-                      height: `${heightPct}%`,
-                      backgroundColor: isHigh ? 'var(--ps-state-occupied)' : 'var(--ps-accent-dark)',
-                      borderRadius: '3px 3px 0 0',
-                      transition: 'var(--ps-transition)'
-                    }} />
-                    <span className="metadata" style={{ fontSize: '0.6875rem', marginTop: '6px' }}>
+                    <div
+                      className="analytics-bar-fill"
+                      style={{
+                        height: `${heightPct}%`,
+                        background: isPeak
+                          ? 'linear-gradient(180deg, #B2A240 0%, #25221B 100%)'
+                          : 'linear-gradient(180deg, rgba(178, 162, 64, 0.4) 0%, rgba(37, 34, 27, 0.6) 100%)',
+                        borderTop: isPeak ? '2px solid var(--ps-accent-light)' : '1px dashed var(--ps-accent-dark)'
+                      }}
+                    />
+                    <span className="analytics-bar-time">
                       {fc.time}
                     </span>
                   </div>
@@ -2441,50 +2705,57 @@ export function OperatorExperience({
               })}
             </div>
 
-            <p className="metadata" style={{ marginTop: '1rem', fontStyle: 'italic' }}>
-              Expected demand reflects algorithmic probabilistic forecasting, not a contractual volume guarantee.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================================
-          TAB 12: PARKSPOT COPILOT CHATBOT
-          ===================================================================== */}
-      {(operatorTab === 'assistant' || operatorTab === 'copilot') && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '880px', width: '100%' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
-            <div>
-              <h2 className="section-title">ParkSpot Copilot</h2>
-              <p className="metadata">Real conversational intelligence for parking facility operations, demand forecasting, and yield management</p>
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setOperatorTab('overview')}
-              >
-                Dashboard
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setOperatorTab('optimization')}
-              >
-                Recommendations
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <span className="metadata" style={{ fontSize: '0.8125rem' }}>
+                Operational capacity ceiling: {totalBays} total spaces for {selectedFacility?.name || 'facility'}.
+              </span>
+              <span className="metadata" style={{ fontSize: '0.75rem', fontFamily: 'var(--ps-font-mono)' }}>
+                Reliability factor: {forecastData.confidence || '92%'}
+              </span>
             </div>
           </div>
 
-          <ParkSpotCopilot
-            operatorName={operatorGreetingName || 'Lara'}
-            selectedFacility={selectedFacility}
-            onNavigateTab={(tab) => setOperatorTab(tab)}
-            isLiveConnected={isLiveConnected}
-            onViewRecommendation={(rec) => {
-              setOperatorTab('optimization');
-            }}
-          />
+          {/* UNDER THE CHART: “What this means” section */}
+          <div className="forecast-meaning-card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+              <TrendingUp size={18} color="var(--ps-accent-dark)" />
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0, color: 'var(--ps-primary-dark)' }}>
+                What this means
+              </h3>
+            </div>
+
+            <div className="forecast-meaning-row">
+              <div className="forecast-meaning-icon-box">
+                <Clock size={18} color="var(--ps-primary-dark)" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: 'var(--ps-primary-dark)', marginBottom: '0.2rem' }}>
+                  {forecastSummary.isRising ? 'Demand is expected to rise' : 'Demand is expected to stabilize'}
+                </div>
+                <p className="metadata" style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.5 }}>
+                  Peak pressure is likely around <strong>{forecastSummary.peakPeriod}</strong> with approximately <strong>{forecastSummary.peakDemand} vehicles</strong> ({forecastSummary.pressurePct}% facility capacity).
+                </p>
+              </div>
+            </div>
+
+            <div className="forecast-meaning-row">
+              <div className="forecast-meaning-icon-box" style={{ backgroundColor: 'rgba(243, 244, 86, 0.25)' }}>
+                <Sparkles size={18} color="var(--ps-accent-dark)" />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: 'var(--ps-primary-dark)', marginBottom: '0.2rem' }}>
+                  Recommended attention
+                </div>
+                <p className="metadata" style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.5 }}>
+                  {recommendations.find((r) => r.status === 'PENDING')
+                    ? `Review capacity and pricing for the upcoming peak period: "${recommendations.find((r) => r.status === 'PENDING').title}". ${recommendations.find((r) => r.status === 'PENDING').expectedImpact}`
+                    : forecastSummary.pressurePct >= 85
+                    ? `Review capacity allocations for the upcoming peak window at ${forecastSummary.peakPeriod}. Consider preparing overflow signage or opening reserved buffers.`
+                    : `Sufficient operating capacity exists for the upcoming forecast window. Standard drive-in and pre-booked turnover is well accommodated.`}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2570,8 +2841,8 @@ export function OperatorExperience({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Forecasting Engine Specification</label>
-              <input type="text" className="form-input" defaultValue="Gradient Boosting ML (Phase 3.2) with Baseline Prior Fallback" readOnly />
+              <label className="form-label">Demand Forecasting Engine</label>
+              <input type="text" className="form-input" defaultValue="Automated Predictive Demand Engine" readOnly />
             </div>
           </div>
 
@@ -2619,7 +2890,7 @@ export function OperatorExperience({
                     <td><span style={{ color: 'var(--ps-state-occupied)' }}>Blocked (403)</span></td>
                   </tr>
                   <tr>
-                    <td>AI Operations Assistant</td>
+                    <td>ParkSpot Copilot Assistant</td>
                     <td><CheckCircle2 size={14} color="var(--ps-state-available)" /></td>
                     <td><CheckCircle2 size={14} color="var(--ps-state-available)" /></td>
                     <td><CheckCircle2 size={14} color="var(--ps-state-available)" /></td>
@@ -2824,6 +3095,16 @@ export function OperatorExperience({
           </div>
         </div>
       )}
+
+      {/* Real Floating ParkSpot Copilot Chatbot */}
+      <ParkSpotCopilot
+        operatorName={operatorGreetingName || 'Operator'}
+        selectedFacility={selectedFacility}
+        onNavigateTab={(tab) => setOperatorTab(tab)}
+        isLiveConnected={isLiveConnected}
+        isOpen={isCopilotOpen}
+        onToggle={setIsCopilotOpen}
+      />
     </div>
   );
 }

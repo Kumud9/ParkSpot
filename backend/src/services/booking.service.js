@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Booking, ParkingSlot, ParkingLot, PricingRule } = require('../models');
+const { Booking, ParkingSlot, ParkingLot, Floor, Vehicle, PricingRule } = require('../models');
 const { AppError } = require('../errors');
 const { parseBookingWindow, calculatePrice } = require('../utils/booking');
 const { slotMutex } = require('../utils/slotLock');
@@ -15,22 +15,41 @@ function serialize(booking) {
       : null,
     slot: booking.slot
       ? { ...booking.slot, id: String(booking.slot._id || booking.slot.id) }
+      : null,
+    floor: booking.floor
+      ? { ...booking.floor, id: String(booking.floor._id || booking.floor.id) }
+      : null,
+    vehicle: booking.vehicle
+      ? { ...booking.vehicle, id: String(booking.vehicle._id || booking.vehicle.id) }
       : null
   };
 }
 
 async function loadBooking(booking) {
-  const [lot, slot] = await Promise.all([
+  const [lot, slot, floor, vehicle] = await Promise.all([
     ParkingLot.findById(booking.lotId).lean(),
-    ParkingSlot.findById(booking.slotId).lean()
+    ParkingSlot.findById(booking.slotId).lean(),
+    booking.floorId ? Floor.findById(booking.floorId).lean() : null,
+    booking.vehicleId ? Vehicle.findById(booking.vehicleId).lean() : null
   ]);
+  const resolvedFloor = floor || (slot?.floorId ? await Floor.findById(slot.floorId).lean() : null);
   const plain = typeof booking.toObject === 'function' ? booking.toObject() : booking;
-  return serialize({ ...plain, lot, slot });
+  return serialize({ ...plain, lot, slot, floor: resolvedFloor, vehicle });
 }
 
 async function listUserBookings(userId) {
   const bookings = await Booking.find({ userId }).sort({ startTime: -1 });
   return await Promise.all(bookings.map(loadBooking));
+}
+
+async function getBookingById(bookingId, userId) {
+  const query = { _id: bookingId };
+  if (userId) query.userId = userId;
+  const booking = await Booking.findOne(query);
+  if (!booking) {
+    throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found.');
+  }
+  return await loadBooking(booking);
 }
 
 let transactionsSupported = null;
@@ -352,6 +371,7 @@ module.exports = {
   serialize,
   loadBooking,
   listUserBookings,
+  getBookingById,
   createBooking,
   cancelBooking,
   completeExpiredBookings,

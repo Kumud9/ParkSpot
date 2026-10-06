@@ -106,10 +106,16 @@ function AppContent() {
         if (isMounted && liveBookings && Array.isArray(liveBookings)) {
           const formatted = liveBookings.map((b) => ({
             id: b.id || b._id,
+            facilityId: b.lotId || b.lot?.id || b.lot?._id,
             facilityName: b.lot?.name || b.lotId?.name || 'Central Business District Parking',
             facilityAddress: b.lot?.address || b.lotId?.address || '14 Connaught Place',
-            floor: b.slot?.level || b.slotId?.level || 'Floor 1',
+            floor: b.floor?.name || b.slot?.level || b.slotId?.level || 'Floor 1',
             spotNumber: b.slot?.number || b.slotId?.number || 'A1',
+            spotId: b.slot?.id || b.slot?._id || b.slotId,
+            lot: b.lot || null,
+            latitude: b.lot?.latitude ?? (b.lot?.location?.coordinates ? b.lot.location.coordinates[1] : null),
+            longitude: b.lot?.longitude ?? (b.lot?.location?.coordinates ? b.lot.location.coordinates[0] : null),
+            vehicle: b.vehicle || null,
             startTime: new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             endTime: new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             startDateTime: b.startTime,
@@ -119,7 +125,7 @@ function AppContent() {
             amount: b.totalAmount || 120,
             qrCode: `PARK-${b.id || b._id}-CONFIRMED`,
             verificationCode: `PS-PASS-${String(b.id || b._id).slice(-8).toUpperCase()}-${b.slot?.number || b.slotId?.number || 'A1'}`,
-            vehiclePlate: b.vehiclePlate || ''
+            vehiclePlate: b.vehicle?.registrationNumber || b.vehiclePlate || ''
           }));
           setBookings(formatted);
         } else if (isMounted) {
@@ -382,6 +388,15 @@ function AppContent() {
               >
                 My Bookings {user && `(${bookings.length})`}
               </button>
+              {user && (
+                <button
+                  className={`nav-link ${driverView === 'vehicles' ? 'active' : ''}`}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                  onClick={() => setDriverView('vehicles')}
+                >
+                  My Vehicles
+                </button>
+              )}
             </nav>
           </div>
 
@@ -486,7 +501,7 @@ function AppContent() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         <header className="app-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
             <div
               className="brand"
               style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
@@ -495,58 +510,6 @@ function AppContent() {
             >
               <Logo variant="full" size="nav" theme="dark" />
             </div>
-
-            <nav className="nav-links" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-              <button
-                className={`nav-link ${operatorTab === 'dashboard' ? 'active' : ''}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => setOperatorTab('dashboard')}
-              >
-                Dashboard
-              </button>
-              <button
-                className={`nav-link ${operatorTab === 'live-parking' ? 'active' : ''}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => setOperatorTab('live-parking')}
-              >
-                Live Parking
-              </button>
-              <button
-                className={`nav-link ${operatorTab === 'bookings' ? 'active' : ''}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => setOperatorTab('bookings')}
-              >
-                Bookings
-              </button>
-              <button
-                className={`nav-link ${operatorTab === 'facilities' ? 'active' : ''}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => setOperatorTab('facilities')}
-              >
-                Facilities
-              </button>
-              <button
-                className={`nav-link ${operatorTab === 'analytics' ? 'active' : ''}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => setOperatorTab('analytics')}
-              >
-                Analytics
-              </button>
-              <button
-                className={`nav-link ${operatorTab === 'optimization' ? 'active' : ''}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => setOperatorTab('optimization')}
-              >
-                Optimization
-              </button>
-              <button
-                className={`nav-link ${operatorTab === 'assistant' || operatorTab === 'copilot' ? 'active' : ''}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => setOperatorTab('copilot')}
-              >
-                ParkSpot Copilot
-              </button>
-            </nav>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>

@@ -41,6 +41,12 @@
   border-radius: var(--ps-radius-sm, 5px);
 }
 
+/* White logo treatment variant */
+.parkspot-logo-container.white-treatment .parkspot-logo-img {
+  filter: brightness(0) invert(1);
+  opacity: 0.95;
+}
+
 /* Size Variants */
 .parkspot-logo-container.size-xs .parkspot-logo-img {
   height: 22px;

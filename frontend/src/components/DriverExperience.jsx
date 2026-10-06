@@ -42,6 +42,10 @@ import './parking/driver-discovery.css';
 import { locationService } from '../services/locationService';
 import { receiptService } from '../services/receiptService';
 import { PaymentSuccessAnimation } from './payment/PaymentSuccessAnimation';
+import { NavigateToEntranceButton } from './driver/NavigateToEntranceButton';
+import { ParkingCountdown } from './driver/ParkingCountdown';
+import { FindMyCarModal } from './driver/FindMyCarModal';
+import { VehicleManagement } from './driver/VehicleManagement';
 
 export function DriverExperience({
   facilities = [],
@@ -226,6 +230,34 @@ export function DriverExperience({
   const [bookingDuration, setBookingDuration] = useState(2); // hours
   const [vehiclePlate, setVehiclePlate] = useState('');
   const [validationErrors, setValidationErrors] = useState({});
+
+  // Driver vehicle management & booking preselection
+  const [driverVehicles, setDriverVehicles] = useState([]);
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [findMyCarBooking, setFindMyCarBooking] = useState(null);
+
+  // Fetch driver's vehicles and automatically preselect default vehicle
+  useEffect(() => {
+    let isCancelled = false;
+    async function fetchVehicles() {
+      if (!activeUser) return;
+      try {
+        const list = await api.getVehicles();
+        if (!isCancelled && Array.isArray(list)) {
+          setDriverVehicles(list);
+          const defaultV = list.find((v) => v.isDefault) || list[0];
+          if (defaultV) {
+            setSelectedVehicle((prev) => prev || defaultV);
+            setVehiclePlate((prev) => prev || defaultV.registrationNumber);
+          }
+        }
+      } catch (err) {
+        console.warn('[DriverExperience] Could not load driver vehicles:', err.message);
+      }
+    }
+    fetchVehicles();
+    return () => { isCancelled = true; };
+  }, [activeUser]);
 
   // Compute calculated end time
   const computedEndTime = useMemo(() => {
@@ -509,7 +541,8 @@ export function DriverExperience({
           slotId: selectedSpot.id,
           startTime: startIso,
           endTime: endIso,
-          type: bookingDuration >= 24 ? 'DAILY' : 'HOURLY'
+          type: bookingDuration >= 24 ? 'DAILY' : 'HOURLY',
+          vehicleId: selectedVehicle?.id || null
         });
 
         const backendBookingId = bookingDoc._id || bookingDoc.id;
@@ -548,6 +581,9 @@ export function DriverExperience({
           facilityId: selectedFacility.id,
           facilityName: selectedFacility.name,
           facilityAddress: selectedFacility.address,
+          lot: selectedFacility,
+          latitude: selectedFacility.latitude ?? (selectedFacility.location?.coordinates ? selectedFacility.location.coordinates[1] : null),
+          longitude: selectedFacility.longitude ?? (selectedFacility.location?.coordinates ? selectedFacility.location.coordinates[0] : null),
           floor: selectedSpot.floor || activeFloor,
           spotNumber: selectedSpot.number,
           spotId: selectedSpot.id,
@@ -561,7 +597,8 @@ export function DriverExperience({
           paymentMethod,
           paymentId: `PAY-${String(backendBookingId).slice(-8).toUpperCase()}`,
           verificationCode: `PS-PASS-${String(backendBookingId).slice(-8).toUpperCase()}-${selectedSpot.number}`,
-          vehiclePlate: vehiclePlate.trim() || 'DL 01 AB 4920',
+          vehicle: selectedVehicle || null,
+          vehiclePlate: vehiclePlate.trim() || selectedVehicle?.registrationNumber || 'DL 01 AB 4920',
           alreadyPersisted: true
         };
 
@@ -623,6 +660,9 @@ export function DriverExperience({
         facilityId: selectedFacility?.id || 'fac-demo',
         facilityName: selectedFacility?.name || 'Central Business District Parking',
         facilityAddress: selectedFacility?.address || '14 Connaught Place',
+        lot: selectedFacility,
+        latitude: selectedFacility?.latitude,
+        longitude: selectedFacility?.longitude,
         floor: selectedSpot?.floor || activeFloor,
         spotNumber: selectedSpot?.number || 'A1',
         spotId: selectedSpot?.id || null,
@@ -636,7 +676,8 @@ export function DriverExperience({
         paymentMethod,
         paymentId: `DEMO-PAY-${Date.now().toString().slice(-6)}`,
         verificationCode: `PS-PASS-DEMO-${selectedSpot?.number || 'A1'}`,
-        vehiclePlate: vehiclePlate.trim() || 'DL 01 AB 4920',
+        vehicle: selectedVehicle || null,
+        vehiclePlate: vehiclePlate.trim() || selectedVehicle?.registrationNumber || 'DL 01 AB 4920',
         isDemo: true
       };
 
@@ -728,6 +769,22 @@ export function DriverExperience({
     );
   };
 
+  // Helper to render Find My Car modal
+  const renderFindMyCarModal = () => {
+    if (!findMyCarBooking) return null;
+    const fac = facilities.find(
+      (f) => f.id === findMyCarBooking.facilityId || f.name === findMyCarBooking.facilityName
+    );
+    return (
+      <FindMyCarModal
+        booking={findMyCarBooking}
+        facility={fac}
+        facilitySpots={fac?.spots || []}
+        onClose={() => setFindMyCarBooking(null)}
+      />
+    );
+  };
+
   // =========================================================================
   // DIGITAL PARKING PASS COMPONENT (Reusable for Confirmation & Modal)
   // =========================================================================
@@ -799,9 +856,12 @@ export function DriverExperience({
               </div>
             </div>
             <div>
-              <span className="metadata">Vehicle Registration</span>
+              <span className="metadata">Vehicle</span>
               <div style={{ fontWeight: 600, fontFamily: 'var(--ps-font-mono)' }}>
-                {booking.vehiclePlate || 'DL 01 AB 4920'}
+                {booking.vehicle ? `${booking.vehicle.make} ${booking.vehicle.model}` : (booking.vehiclePlate ? 'Registered' : 'Standard')}
+              </div>
+              <div style={{ fontSize: '0.75rem', fontFamily: 'var(--ps-font-mono)', color: 'var(--ps-secondary-dark)' }}>
+                {booking.vehiclePlate || booking.vehicle?.registrationNumber || 'DL 01 AB 4920'}
               </div>
             </div>
             <div>
@@ -832,7 +892,45 @@ export function DriverExperience({
             Software-based digital access credential. Present to facility staff or check-in attendant upon entry.
           </p>
 
-          <div style={{ display: 'flex', gap: '0.65rem', marginTop: '1.25rem' }}>
+          {/* Driver Actions: Navigate to Entrance, Find My Car, View Parking Map */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '1rem' }}>
+            <NavigateToEntranceButton
+              booking={booking}
+              facility={facilities.find((f) => f.id === booking.facilityId || f.name === booking.facilityName)}
+              showDistance={true}
+            />
+
+            <div style={{ display: 'flex', gap: '0.65rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontSize: '0.8125rem' }}
+                onClick={() => setFindMyCarBooking(booking)}
+              >
+                <Car size={15} /> Find My Car
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontSize: '0.8125rem' }}
+                onClick={() => {
+                  const fac = facilities.find((f) => f.id === booking.facilityId || f.name === booking.facilityName);
+                  if (fac) {
+                    setSelectedFacility(fac);
+                    setActiveFloor(booking.floor || 'Floor 1');
+                    setSelectedSpot(fac.spots?.find((s) => s.number === booking.spotNumber || s.id === booking.spotId) || null);
+                    setActiveView('facility');
+                    if (onClose) onClose();
+                  }
+                }}
+              >
+                <MapPin size={15} /> View Parking Map
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.65rem', marginTop: '0.75rem' }}>
             <button
               type="button"
               className="download-receipt-btn"
@@ -1447,18 +1545,74 @@ export function DriverExperience({
             </div>
           </div>
 
-          {/* Vehicle License Plate */}
-          <div className="form-group">
-            <label className="form-label" htmlFor="res-plate">Vehicle License Plate (Optional)</label>
-            <input
-              id="res-plate"
-              type="text"
-              className="form-input"
-              placeholder="e.g. DL 01 AB 4920"
-              value={vehiclePlate}
-              onChange={(e) => setVehiclePlate(e.target.value)}
-              style={{ textTransform: 'uppercase', fontFamily: 'var(--ps-font-mono)' }}
-            />
+          {/* Vehicle Selection Integration */}
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+              <label className="form-label" htmlFor="res-vehicle" style={{ margin: 0 }}>Vehicle</label>
+              <button
+                type="button"
+                onClick={() => setActiveView('vehicles')}
+                style={{ fontSize: '0.75rem', color: 'var(--ps-secondary-dark)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                Manage Vehicles
+              </button>
+            </div>
+
+            {driverVehicles && driverVehicles.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <select
+                  id="res-vehicle"
+                  className="form-select"
+                  value={selectedVehicle?.id || 'manual'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'manual') {
+                      setSelectedVehicle(null);
+                    } else {
+                      const found = driverVehicles.find((v) => v.id === val);
+                      if (found) {
+                        setSelectedVehicle(found);
+                        setVehiclePlate(found.registrationNumber);
+                      }
+                    }
+                  }}
+                  style={{ fontFamily: 'var(--ps-font-mono)', fontSize: '0.875rem' }}
+                >
+                  {driverVehicles.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.nickname || `${v.make} ${v.model}`} · {v.registrationNumber}{v.isDefault ? ' (Default)' : ''}
+                    </option>
+                  ))}
+                  <option value="manual">+ Enter different vehicle plate...</option>
+                </select>
+
+                {(!selectedVehicle || selectedVehicle === 'manual') && (
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Enter registration number (e.g. DL 01 AB 4920)"
+                    value={vehiclePlate}
+                    onChange={(e) => setVehiclePlate(e.target.value)}
+                    style={{ textTransform: 'uppercase', fontFamily: 'var(--ps-font-mono)', marginTop: '0.25rem' }}
+                  />
+                )}
+              </div>
+            ) : (
+              <div>
+                <input
+                  id="res-plate"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. DL 01 AB 4920"
+                  value={vehiclePlate}
+                  onChange={(e) => setVehiclePlate(e.target.value)}
+                  style={{ textTransform: 'uppercase', fontFamily: 'var(--ps-font-mono)' }}
+                />
+                <div style={{ fontSize: '0.75rem', color: 'var(--ps-secondary-dark)', marginTop: '0.35rem' }}>
+                  Tip: Register your vehicle in <strong>My Vehicles</strong> to auto-fill every time.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Dwell summary */}
@@ -1561,8 +1715,15 @@ export function DriverExperience({
               <span>{bookingDuration} {bookingDuration === 1 ? 'hour' : 'hours'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '0.5rem', borderBottom: '1px solid var(--ps-secondary-light)' }}>
-              <span className="metadata">Vehicle Registration</span>
-              <span style={{ fontFamily: 'var(--ps-font-mono)' }}>{vehiclePlate || 'DL 01 AB 4920'}</span>
+              <span className="metadata">Vehicle</span>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontWeight: 600 }}>
+                  {selectedVehicle ? (selectedVehicle.nickname || `${selectedVehicle.make} ${selectedVehicle.model}`) : 'Standard Vehicle'}
+                </div>
+                <div style={{ fontFamily: 'var(--ps-font-mono)', fontSize: '0.8125rem', color: 'var(--ps-secondary-dark)' }}>
+                  {vehiclePlate || selectedVehicle?.registrationNumber || 'DL 01 AB 4920'}
+                </div>
+              </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '0.5rem', fontSize: '1.2rem' }}>
               <strong>Total Amount</strong>
@@ -2041,6 +2202,9 @@ export function DriverExperience({
             View My Bookings
           </button>
         </div>
+
+        {/* Find My Car Modal */}
+        {renderFindMyCarModal()}
       </div>
     );
   }
@@ -2086,6 +2250,73 @@ export function DriverExperience({
           </div>
         )}
 
+        {/* ACTIVE PARKING HERO CARD (Requirement 10) */}
+        {(() => {
+          const now = new Date();
+          const activeBooking = bookings.find((b) => {
+            const isConfirmed = b.status === 'CONFIRMED' || b.status === 'ACTIVE';
+            const endT = b.endDateTime ? new Date(b.endDateTime) : null;
+            return isConfirmed && (!endT || endT > now);
+          });
+
+          if (!activeBooking) return null;
+
+          const fac = facilities.find((f) => f.id === activeBooking.facilityId || f.name === activeBooking.facilityName);
+
+          return (
+            <div className="active-parking-hero" style={{
+              backgroundColor: 'var(--ps-primary-light)',
+              border: '2px solid var(--ps-accent-dark)',
+              borderRadius: 'var(--ps-radius-md)',
+              padding: '1.5rem',
+              marginBottom: '1.75rem',
+              boxShadow: 'var(--ps-shadow-card)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <span className="eyebrow" style={{ color: 'var(--ps-secondary-dark)', letterSpacing: '0.08em' }}>
+                    ACTIVE PARKING
+                  </span>
+                  <h2 style={{ fontSize: '1.35rem', color: 'var(--ps-primary-dark)', margin: '0.15rem 0' }}>
+                    {activeBooking.facilityName}
+                  </h2>
+                  <p className="metadata">{activeBooking.facilityAddress}</p>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => setActiveBookingDetail(activeBooking)}
+                >
+                  <Ticket size={14} /> Digital Pass
+                </button>
+              </div>
+
+              {/* Real End-Time Countdown with 30m, 10m and Expiry Reminders */}
+              <ParkingCountdown booking={activeBooking} />
+
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-accent"
+                  style={{ flex: 1, minWidth: '150px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                  onClick={() => setFindMyCarBooking(activeBooking)}
+                >
+                  <Car size={16} /> Find My Car
+                </button>
+
+                <div style={{ flex: 1, minWidth: '150px' }}>
+                  <NavigateToEntranceButton
+                    booking={activeBooking}
+                    facility={fac}
+                    showDistance={true}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Filter Pills */}
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
           {[
@@ -2128,11 +2359,30 @@ export function DriverExperience({
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
                   <div style={{ textAlign: 'right', marginRight: '0.5rem' }}>
                     <div style={{ fontWeight: 700, fontSize: '1.15rem' }}>₹{b.amount}</div>
                     <div className="metadata">{isCancelled ? 'Refunded' : 'Paid'}</div>
                   </div>
+
+                  {!isCancelled && (
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setFindMyCarBooking(b)}
+                      title="Find your vehicle and spot in facility"
+                    >
+                      <Car size={14} /> Find My Car
+                    </button>
+                  )}
+
+                  {!isCancelled && (
+                    <NavigateToEntranceButton
+                      booking={b}
+                      facility={facilities.find((f) => f.id === b.facilityId || f.name === b.facilityName)}
+                      showDistance={false}
+                      size="sm"
+                    />
+                  )}
 
                   <button
                     className="btn btn-outline btn-sm"
@@ -2239,7 +2489,24 @@ export function DriverExperience({
             </div>
           </div>
         )}
+
+        {/* Find My Car Modal */}
+        {renderFindMyCarModal()}
       </div>
+    );
+  }
+
+  // =========================================================================
+  // SCREEN 11: MY VEHICLES (VEHICLE PROFILES & CRUD)
+  // =========================================================================
+  if (activeView === 'vehicles') {
+    return (
+      <VehicleManagement
+        activeUser={activeUser}
+        vehicles={driverVehicles}
+        onVehiclesChange={(updated) => setDriverVehicles(updated)}
+        isLiveConnected={isLiveConnected}
+      />
     );
   }
 

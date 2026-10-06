@@ -27,7 +27,7 @@ export function LandingNavbar({ onOpenAuth }) {
   return (
     <header className={`landing-nav-wrapper ${isScrolled ? 'scrolled' : ''}`}>
       <nav className="landing-nav-container">
-        {/* Left: ParkSpot Logo */}
+        {/* Left: ParkSpot Brand (New Uploaded Logo Asset + Wordmark) */}
         <div
           className="landing-nav-brand"
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
@@ -35,7 +35,15 @@ export function LandingNavbar({ onOpenAuth }) {
           tabIndex={0}
           aria-label="ParkSpot Home"
         >
-          <Logo variant="full" size="nav" theme="light" />
+          <img
+            src="/assets/parkspot-uploaded-logo.png"
+            alt="ParkSpot"
+            className="landing-brand-logo-img"
+          />
+          <span className="landing-brand-wordmark">
+            <span className="landing-wordmark-park">Park</span>
+            <span className="landing-wordmark-spot">Spot</span>
+          </span>
         </div>
 
         {/* Center: Navigation Links */}

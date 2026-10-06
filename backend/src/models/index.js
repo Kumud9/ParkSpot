@@ -164,13 +164,16 @@ const vehicleSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', default: null, index: true },
   registrationNumber: { type: String, required: true, uppercase: true, trim: true, index: true },
+  nickname: { type: String, trim: true, default: null },
   vehicleType: {
     type: String,
     enum: ['CAR', 'BIKE', 'SUV', 'TRUCK', 'OTHER'],
     default: 'CAR'
   },
   make: { type: String, trim: true, default: null },
-  model: { type: String, trim: true, default: null }
+  model: { type: String, trim: true, default: null },
+  color: { type: String, trim: true, default: null },
+  isDefault: { type: Boolean, default: false, index: true }
 }, { timestamps: true });
 vehicleSchema.index({ userId: 1, registrationNumber: 1 }, { unique: true });
 

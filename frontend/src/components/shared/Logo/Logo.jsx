@@ -27,11 +27,12 @@ export function Logo({
   const sizeClass = typeof size === 'string' ? `size-${size}` : '';
   const customHeight = typeof size === 'number' ? `${size}px` : undefined;
 
+  const isWhite = variant === 'white' || theme === 'white';
   const containerClasses = [
     'parkspot-logo-container',
     sizeClass,
     `variant-${variant}`,
-    theme === 'dark' ? 'on-dark' : 'on-light',
+    isWhite ? 'white-treatment' : (theme === 'dark' ? 'on-dark' : 'on-light'),
     onClick ? 'clickable' : '',
     className
   ].filter(Boolean).join(' ');

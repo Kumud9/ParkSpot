@@ -36,6 +36,15 @@ async function createBooking(req, res, next) {
   }
 }
 
+async function getBookingById(req, res, next) {
+  try {
+    const booking = await bookingService.getBookingById(req.params.id, req.user.sub);
+    res.json({ booking });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function cancelBooking(req, res, next) {
   try {
     const booking = await bookingService.cancelBooking({
@@ -52,6 +61,7 @@ async function cancelBooking(req, res, next) {
 
 module.exports = {
   listUserBookings,
+  getBookingById,
   createBooking,
   cancelBooking
 };

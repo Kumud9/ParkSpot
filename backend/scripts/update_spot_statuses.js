@@ -1,12 +1,11 @@
 const mongoose = require('mongoose');
+const { connectDatabase } = require('../src/db');
 require('dotenv').config();
-
-const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/parkspot';
 
 async function updateSpots() {
   try {
-    await mongoose.connect(uri);
-    console.log('[ParkSpot] Connected to MongoDB:', uri);
+    await connectDatabase();
+
 
     const db = mongoose.connection.db;
     const slotsCollection = db.collection('parkingslots');

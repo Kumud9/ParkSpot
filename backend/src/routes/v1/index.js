@@ -23,5 +23,6 @@ router.use('/analytics', analyticsRoutes);
 router.use('/optimization', optimizationRoutes);
 router.use('/forecasting', forecastingRoutes);
 router.use('/ai', aiRoutes);
+router.use('/copilot', aiRoutes);
 
 module.exports = router;

@@ -83,6 +83,7 @@ app.use('/api', globalLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/lots', lotRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/vehicles', require('./routes/v1/vehicle.routes'));
 app.use('/api/admin', adminRoutes);
 
 // Mount Version 1 B2B routes

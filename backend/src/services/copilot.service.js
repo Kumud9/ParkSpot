@@ -6,6 +6,7 @@ const analyticsService = require('./analytics.service');
 const forecastingService = require('./forecasting.service');
 const optimizationService = require('./optimization.service');
 const { logAction } = require('./audit.service');
+const geminiService = require('./gemini.service');
 
 function toObjectId(id) {
   if (!id) return null;
@@ -119,7 +120,108 @@ async function processCopilotChat({ organizationId, userId, messages = [], facil
     ? await optimizationService.detectOverstays({ organizationId: orgId, facilityId: targetFacility._id, limit: 10 })
     : { overstays: [] };
 
-  // 3. Conversational Reasoning & Response Generation
+  // 3. Gemini Conversational AI Layer (Real LLM Integration)
+  const geminiApiKey = process.env.GEMINI_API_KEY || process.env.LLM_API_KEY;
+  if (geminiApiKey) {
+    try {
+      const operationalSnapshot = {
+        organizationId: String(orgId),
+        targetFacility: targetFacility ? {
+          id: String(targetFacility._id),
+          name: targetFacility.name,
+          city: targetFacility.city,
+          address: targetFacility.address,
+          hourlyRate: targetFacility.hourlyRate,
+          dailyRate: targetFacility.dailyRate,
+          totalSpots: targetFacility.totalSpots
+        } : null,
+        allFacilities: allFacilities.map((f) => ({
+          id: String(f._id),
+          name: f.name,
+          city: f.city,
+          hourlyRate: f.hourlyRate
+        })),
+        facilityMetrics: facilityContext ? {
+          occupancyPercentage: facilityContext.spots?.currentOccupancyPercentage,
+          totalSpots: facilityContext.spots?.total,
+          availableSpots: facilityContext.spots?.currentlyAvailable,
+          occupiedSpots: facilityContext.spots?.currentlyOccupied,
+          reservedSpots: facilityContext.spots?.currentlyReserved,
+          peakHours: facilityContext.peakHours,
+          demandForecast: facilityContext.demandForecast
+        } : null,
+        activeRecommendations: pendingRecs.map((r) => ({
+          id: String(r._id),
+          type: r.type,
+          title: r.title,
+          reason: r.reason,
+          confidence: r.confidence
+        })),
+        overstays: overstaysResult.overstays.map((o) => ({
+          spotNumber: o.spotNumber,
+          durationMinutes: o.overstayDurationMinutes,
+          status: o.overstayStatus
+        }))
+      };
+
+      const geminiReply = await geminiService.callGemini({
+        apiKey: geminiApiKey,
+        model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+        messages: cleanMessages.slice(0, -1),
+        operationalContext: operationalSnapshot,
+        question: lastUserMsg.content
+      });
+
+      if (geminiReply) {
+        let matchingRec = null;
+        if (pendingRecs.length > 0) {
+          matchingRec = {
+            id: String(pendingRecs[0]._id),
+            title: pendingRecs[0].title,
+            type: pendingRecs[0].type,
+            reason: pendingRecs[0].reason,
+            confidence: pendingRecs[0].confidence
+          };
+        }
+
+        try {
+          await logAction({
+            organizationId: orgId,
+            userId,
+            action: 'COPILOT_CHAT_QUERY_GEMINI',
+            entityType: 'Organization',
+            entityId: orgId,
+            newValue: {
+              query: queryText.slice(0, 100),
+              targetFacility: targetFacility?.name || 'All Facilities',
+              provider: 'GEMINI'
+            }
+          });
+        } catch (_auditErr) {}
+
+        return {
+          reply: geminiReply,
+          recommendation: matchingRec,
+          keyMetrics: facilityContext?.spots ? {
+            occupancy: `${facilityContext.spots.currentOccupancyPercentage || 0}%`,
+            availableBays: `${facilityContext.spots.currentlyAvailable || 0}`,
+            pendingActions: `${pendingRecs.length} recommendations`
+          } : {},
+          quickActions: [
+            { label: 'View Live Map', tab: 'map' },
+            { label: 'Review Recommendations', tab: 'recommendations' }
+          ],
+          facilityName: targetFacility?.name || 'ParkSpot Network',
+          facilityId: targetFacility ? String(targetFacility._id) : null,
+          source: 'GEMINI'
+        };
+      }
+    } catch (geminiError) {
+      console.warn('[ParkSpotCopilot] Gemini invocation failed, falling back to built-in intelligence:', geminiError.message);
+    }
+  }
+
+  // 4. Built-in ParkSpot Deterministic Operational Intelligence Engine (Graceful Fallback / Zero-Config)
   let reply = '';
   let recommendationCard = null;
   let keyMetrics = {};

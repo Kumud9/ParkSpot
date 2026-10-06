@@ -174,9 +174,61 @@
 
 .landing-nav-brand {
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  gap: 0.65rem;
   flex-shrink: 0;
+  text-decoration: none;
+  user-select: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.landing-nav-brand:hover {
+  opacity: 0.94;
+}
+
+.landing-brand-logo-img {
+  height: 52px;
+  width: auto;
+  max-width: none;
+  object-fit: contain;
+  display: block;
+}
+
+.landing-brand-wordmark {
+  font-family: var(--lp-font-display, 'Outfit', 'Inter', -apple-system, sans-serif);
+  font-size: 2.15rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.landing-wordmark-park {
+  color: #F5A623; /* Exact yellow from ParkSpot logo pin */
+}
+
+.landing-wordmark-spot {
+  color: #000000; /* Black as specified */
+}
+
+@media (max-width: 900px) {
+  .landing-brand-logo-img {
+    height: 42px;
+  }
+  .landing-brand-wordmark {
+    font-size: 1.75rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .landing-brand-logo-img {
+    height: 36px;
+  }
+  .landing-brand-wordmark {
+    font-size: 1.45rem;
+  }
 }
 
 .landing-nav-center {

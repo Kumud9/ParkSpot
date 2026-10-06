@@ -21,8 +21,17 @@ export function LandingFooter() {
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               role="button"
               tabIndex={0}
+              style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.65rem' }}
             >
-              <Logo variant="full" size="md" theme="dark" />
+              <img
+                src="/assets/parkspot-uploaded-logo.png"
+                alt="ParkSpot"
+                style={{ height: '44px', width: 'auto', objectFit: 'contain' }}
+              />
+              <span style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
+                <span style={{ color: '#F5A623' }}>Park</span>
+                <span style={{ color: '#FFFFFF' }}>Spot</span>
+              </span>
             </div>
             <p className="footer-tagline">Parking, without the search.</p>
             <p className="footer-desc">
