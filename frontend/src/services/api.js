@@ -222,12 +222,41 @@ export const api = {
   },
 
   /**
-   * Auth: Register new user / driver / operator
+   * Auth: Register / Signup new user (Driver or Operator)
    */
   async register({ email, password, name, accountType, organizationName, role }) {
     const data = await request('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password, name, accountType, organizationName, role })
+    });
+    return data;
+  },
+
+  /**
+   * Auth: Two-step signup alias
+   */
+  async signup(payload) {
+    return api.register(payload);
+  },
+
+  /**
+   * Auth: Verify 6-digit signup OTP
+   */
+  async verifySignup({ email, otp, token }) {
+    const data = await request('/auth/verify-signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp, token })
+    });
+    return data;
+  },
+
+  /**
+   * Auth: Resend 6-digit signup OTP with cooldown
+   */
+  async resendSignupOtp({ email, token }) {
+    const data = await request('/auth/resend-signup-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, token })
     });
     return data;
   },

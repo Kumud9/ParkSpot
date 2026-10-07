@@ -9,6 +9,9 @@ function authenticate(req, _res, next) {
   }
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
+    if (req.user.purpose === 'SIGNUP_VERIFICATION') {
+      return next(new AppError(403, 'VERIFICATION_REQUIRED', 'Please verify your account to access this service.'));
+    }
     if (!req.user.accountType) {
       req.user.accountType = ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(req.user.role) ? 'OPERATOR' : 'DRIVER';
     }

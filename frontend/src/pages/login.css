@@ -280,3 +280,92 @@
     border-radius: 20px;
   }
 }
+
+/* 2-Step OTP Verification Styles */
+.otp-inputs-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin: 1.5rem 0 1rem;
+}
+
+.otp-digit-box {
+  width: 48px;
+  height: 56px;
+  font-size: 1.5rem;
+  font-weight: 800;
+  text-align: center;
+  font-family: var(--ps-font-mono, monospace);
+  border: 2px solid var(--ps-secondary-light, #E6DFD1);
+  border-radius: 10px;
+  background-color: #FAF8F2;
+  color: var(--ps-primary-dark, #25221B);
+  outline: none;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.otp-digit-box:focus {
+  border-color: var(--ps-accent-dark, #B2A240);
+  background-color: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(243, 244, 86, 0.3);
+}
+
+.otp-digit-box.filled {
+  border-color: var(--ps-primary-dark, #25221B);
+  background-color: #FFFFFF;
+}
+
+.otp-resend-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1.25rem;
+  font-size: 0.8125rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.otp-resend-btn {
+  background: none;
+  border: none;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ps-primary-dark, #25221B);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font-family: inherit;
+}
+
+.otp-resend-btn:disabled {
+  color: var(--ps-secondary-dark, #707371);
+  cursor: not-allowed;
+  text-decoration: none;
+  opacity: 0.7;
+}
+
+.otp-cooldown-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  color: var(--ps-secondary-dark, #707371);
+  font-weight: 600;
+  font-family: var(--ps-font-mono, monospace);
+}
+
+.auth-success-banner {
+  background-color: #DEF7EC;
+  color: #03543F;
+  border: 1px solid #31C48D;
+  border-radius: 8px;
+  padding: 0.75rem 0.95rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.8125rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+}
+

@@ -95,7 +95,13 @@ test('PARKSPOT RBAC: Public Account Model (DRIVER / OPERATOR) & Route Enforcemen
     assert.equal(driverA.user.internalRole, null);
     assert.equal(driverA.user.organizationId, null);
     assert.ok(driverA.token);
-    driverTokenA = driverA.token;
+
+    // Verify account with OTP
+    const verifyRes = await authService.verifySignupOtp({
+      email: driverEmailA,
+      otp: driverA.devOtp
+    });
+    driverTokenA = verifyRes.token;
 
     // Login verifies MongoDB persists accountType = DRIVER
     const loginRes = await authService.login({
@@ -120,7 +126,13 @@ test('PARKSPOT RBAC: Public Account Model (DRIVER / OPERATOR) & Route Enforcemen
     assert.equal(operatorUser.user.internalRole, 'OWNER');
     assert.ok(operatorUser.user.organizationId);
     assert.ok(operatorUser.token);
-    operatorToken = operatorUser.token;
+
+    // Verify Operator account
+    const verifyRes = await authService.verifySignupOtp({
+      email: operatorEmail,
+      otp: operatorUser.devOtp
+    });
+    operatorToken = verifyRes.token;
 
     // Login returns real accountType OPERATOR and internalRole OWNER
     const loginRes = await authService.login({
@@ -155,7 +167,11 @@ test('PARKSPOT RBAC: Public Account Model (DRIVER / OPERATOR) & Route Enforcemen
       password: 'Pass@12345',
       accountType: 'DRIVER'
     });
-    driverTokenB = driverB.token;
+    const verifyB = await authService.verifySignupOtp({
+      email: driverEmailB,
+      otp: driverB.devOtp
+    });
+    driverTokenB = verifyB.token;
 
     // Create facility & slot for booking test
     testFacility = await ParkingLot.create({

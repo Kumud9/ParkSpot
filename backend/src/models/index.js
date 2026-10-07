@@ -46,7 +46,12 @@ const userSchema = new Schema({
     default: null,
     index: true
   },
-  status: { type: String, enum: ['ACTIVE', 'SUSPENDED'], default: 'ACTIVE' }
+  status: { type: String, enum: ['ACTIVE', 'SUSPENDED'], default: 'ACTIVE' },
+  isVerified: { type: Boolean, default: false, index: true },
+  verificationOtpHash: { type: String, default: null },
+  verificationOtpExpiresAt: { type: Date, default: null },
+  verificationAttempts: { type: Number, default: 0 },
+  verificationLastSentAt: { type: Date, default: null }
 }, { timestamps: true });
 
 userSchema.pre('save', function(next) {

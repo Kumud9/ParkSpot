@@ -69,6 +69,11 @@ export function AuthProvider({ children }) {
       accountType,
       organizationName
     });
+    // If backend requires OTP verification, return pending verification payload
+    if (res?.status === 'PENDING_VERIFICATION' || res?.requiresVerification) {
+      return res;
+    }
+    // Fallback if auto-verified
     if (res?.token && res?.user) {
       authStorage.setToken(res.token);
       authStorage.setUser(res.user);
@@ -76,6 +81,21 @@ export function AuthProvider({ children }) {
       return res.user;
     }
     throw new Error('Invalid registration response.');
+  }, []);
+
+  const verifySignup = useCallback(async ({ email, otp, token }) => {
+    const res = await api.verifySignup({ email, otp, token });
+    if (res?.token && res?.user) {
+      authStorage.setToken(res.token);
+      authStorage.setUser(res.user);
+      setUser(res.user);
+      return res.user;
+    }
+    throw new Error(res?.message || 'Verification could not be completed.');
+  }, []);
+
+  const resendSignupOtp = useCallback(async ({ email, token }) => {
+    return api.resendSignupOtp({ email, token });
   }, []);
 
   const logout = useCallback(() => {
@@ -89,6 +109,8 @@ export function AuthProvider({ children }) {
     isLoading,
     login,
     signup,
+    verifySignup,
+    resendSignupOtp,
     logout
   };
 

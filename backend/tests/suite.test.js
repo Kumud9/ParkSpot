@@ -28,4 +28,5 @@ require('./phase3_2.test');
 require('./phase4_4.test');
 require('./rbac_account_model.test');
 require('./driver_experience_features.test');
+require('./signup_verification.test');
 
