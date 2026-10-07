@@ -82,6 +82,7 @@ async function createPaymentOrder({ bookingId, userId, organizationId = null, ip
       order: {
         id: existingActive.providerOrderId,
         amount: existingActive.amount,
+        amountPaise: Math.round(existingActive.amount * 100),
         currency: existingActive.currency,
         keyId: isMockEnabled() ? 'rzp_test_mock_key' : process.env.RAZORPAY_KEY_ID
       }
@@ -146,6 +147,7 @@ async function createPaymentOrder({ bookingId, userId, organizationId = null, ip
     order: {
       id: payment.providerOrderId,
       amount: payment.amount,
+      amountPaise: amountPaise,
       currency: payment.currency,
       keyId: useMock ? 'rzp_test_mock_key' : process.env.RAZORPAY_KEY_ID
     }

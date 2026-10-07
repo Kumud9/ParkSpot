@@ -22,20 +22,20 @@ export function PaymentSuccessAnimation({
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
-    // Phase 1 -> 2: Coin travels and impacts terminal at 1200ms
+    // Phase 1 -> 2: Coin travels and impacts terminal at 350ms
     const impactTimer = setTimeout(() => {
       setPhase('impact');
-    }, 1200);
+    }, 350);
 
-    // Phase 2 -> 3: Confirmation banner with checkmark appears at 2000ms
+    // Phase 2 -> 3: Confirmation banner with checkmark appears at 650ms
     const confirmTimer = setTimeout(() => {
       setPhase('confirmed');
-    }, 2000);
+    }, 650);
 
-    // Phase 3 -> Pass: Transition to confirmed booking pass view at 3600ms (3.6s total)
+    // Phase 3 -> Pass: Transition to confirmed booking pass view at 1000ms (~1 second total)
     const completeTimer = setTimeout(() => {
       if (onCompleteRef.current) onCompleteRef.current();
-    }, 3600);
+    }, 1000);
 
     return () => {
       clearTimeout(impactTimer);

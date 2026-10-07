@@ -47,6 +47,27 @@ import { ParkingCountdown } from './driver/ParkingCountdown';
 import { FindMyCarModal } from './driver/FindMyCarModal';
 import { VehicleManagement } from './driver/VehicleManagement';
 
+function loadRazorpayScript() {
+  return new Promise((resolve) => {
+    if (typeof window !== 'undefined' && window.Razorpay) {
+      resolve(true);
+      return;
+    }
+    const existing = document.querySelector('script[src*="checkout.razorpay.com"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(true));
+      existing.addEventListener('error', () => resolve(false));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
 export function DriverExperience({
   facilities = [],
   bookings = [],
@@ -326,9 +347,6 @@ export function DriverExperience({
   const [upiId, setUpiId] = useState('');
   const [upiError, setUpiError] = useState('');
   const [selectedBank, setSelectedBank] = useState('HDFC Bank');
-  const [cardHolder, setCardHolder] = useState(activeUser?.name || '');
-  const [cardNumber, setCardNumber] = useState('•••• •••• •••• 4028');
-  const [cardExpiry, setCardExpiry] = useState('08/28');
 
   // -------------------------------------------------------------
   // MY BOOKINGS & CANCELLATION STATE
@@ -549,9 +567,120 @@ export function DriverExperience({
 
         // Step B: Create payment order
         const orderRes = await api.createPaymentOrder(backendBookingId);
-        const orderId = orderRes?.order?.id || `ord_${Date.now()}`;
+        const order = orderRes?.order;
+        const isRealRazorpay = Boolean(order?.keyId && !order.keyId.includes('mock'));
 
-        // Step C: Verify payment with signature
+        if (isRealRazorpay) {
+          await loadRazorpayScript();
+          if (typeof window === 'undefined' || !window.Razorpay) {
+            setPaymentState('FAILED');
+            setShowCoinAnimation(false);
+            setPaymentError('Razorpay payment gateway failed to initialize. Please check your internet connection.');
+            return;
+          }
+
+          const options = {
+            key: order.keyId,
+            amount: order.amountPaise || Math.round(calculatedCost * 100),
+            currency: order.currency || 'INR',
+            name: 'ParkSpot',
+            description: `Parking Reservation · Spot ${selectedSpot.number} (${selectedFacility.name})`,
+            order_id: order.id,
+            prefill: {
+              name: activeUser?.name || 'ParkSpot Driver',
+              email: activeUser?.email || 'driver@parkspot.in',
+              contact: activeUser?.phone || '9876543210',
+              ...(paymentMethod === 'UPI' && upiMode === 'vpa' && upiId.trim() ? { vpa: upiId.trim() } : {}),
+              ...(paymentMethod === 'CARD' ? { method: 'card' } : {}),
+              ...(paymentMethod === 'NETBANKING' ? { method: 'netbanking' } : {}),
+              ...(paymentMethod === 'UPI' ? { method: 'upi' } : {})
+            },
+            notes: {
+              bookingId: String(backendBookingId),
+              facilityName: selectedFacility.name,
+              spotNumber: selectedSpot.number
+            },
+            theme: {
+              color: '#25221B'
+            },
+            modal: {
+              ondismiss: () => {
+                setPaymentState('FAILED');
+                setShowCoinAnimation(false);
+                setPaymentError('Payment was cancelled. Your parking spot has not been confirmed. You can try again or select another payment method.');
+              }
+            },
+            handler: async (response) => {
+              // Razorpay returned payment info - must verify on backend!
+              setPaymentState('PROCESSING');
+              try {
+                const verifyPayload = {
+                  orderId: response.razorpay_order_id,
+                  paymentId: response.razorpay_payment_id,
+                  signature: simulateFailure ? 'invalid_tampered_signature' : response.razorpay_signature
+                };
+
+                const verifyRes = await api.verifyPayment(verifyPayload);
+
+                if (verifyRes?.success) {
+                  const newBooking = {
+                    id: String(backendBookingId),
+                    facilityId: selectedFacility.id,
+                    facilityName: selectedFacility.name,
+                    facilityAddress: selectedFacility.address,
+                    lot: selectedFacility,
+                    latitude: selectedFacility.latitude ?? (selectedFacility.location?.coordinates ? selectedFacility.location.coordinates[1] : null),
+                    longitude: selectedFacility.longitude ?? (selectedFacility.location?.coordinates ? selectedFacility.location.coordinates[0] : null),
+                    floor: selectedSpot.floor || activeFloor,
+                    spotNumber: selectedSpot.number,
+                    spotId: selectedSpot.id,
+                    startTime: `${bookingDate}, ${bookingStartTime}`,
+                    endTime: `${bookingDate}, ${computedEndTime}`,
+                    startDateTime: startIso,
+                    endDateTime: endIso,
+                    duration: `${bookingDuration} ${bookingDuration === 1 ? 'hour' : 'hours'}`,
+                    status: 'CONFIRMED',
+                    amount: calculatedCost,
+                    paymentMethod,
+                    paymentId: response.razorpay_payment_id || `PAY-${String(backendBookingId).slice(-8).toUpperCase()}`,
+                    transactionId: response.razorpay_payment_id,
+                    orderId: response.razorpay_order_id,
+                    verificationCode: `PS-PASS-${String(backendBookingId).slice(-8).toUpperCase()}-${selectedSpot.number}`,
+                    vehicle: selectedVehicle || null,
+                    vehiclePlate: vehiclePlate.trim() || selectedVehicle?.registrationNumber || 'DL 01 AB 4920',
+                    alreadyPersisted: true
+                  };
+
+                  onAddBooking && onAddBooking(newBooking);
+                  setConfirmedBooking(newBooking);
+                  setPaymentState('SUCCESS');
+                  setShowCoinAnimation(true);
+                  refreshFacilitySpots();
+                } else {
+                  setPaymentState('FAILED');
+                  setShowCoinAnimation(false);
+                  setPaymentError('Payment verification could not be completed.');
+                }
+              } catch (verifyErr) {
+                setPaymentState('FAILED');
+                setShowCoinAnimation(false);
+                setPaymentError(verifyErr.message || 'Payment signature verification failed. Spot reservation was not confirmed.');
+              }
+            }
+          };
+
+          const rzp = new window.Razorpay(options);
+          rzp.on('payment.failed', (errResp) => {
+            setPaymentState('FAILED');
+            setShowCoinAnimation(false);
+            setPaymentError(errResp.error?.description || 'Payment was declined by payment gateway or bank.');
+          });
+          rzp.open();
+          return;
+        }
+
+        // Mock fallback mode (only used when MOCK_PAYMENT is enabled or test mode)
+        const orderId = order?.id || `ord_${Date.now()}`;
         if (simulateFailure) {
           // Intentional failure trigger
           try {
@@ -1799,10 +1928,81 @@ export function DriverExperience({
       );
     }
 
-    if (paymentState === 'PROCESSING') {
+    if (paymentState === 'FAILED') {
+      return (
+        <div className="container" style={{ maxWidth: '560px', padding: '2rem 1rem' }}>
+          <div className="card text-center" style={{ padding: '2.5rem 2rem', textAlign: 'center' }}>
+            <div style={{
+              width: '56px',
+              height: '56px',
+              backgroundColor: '#FDE8E8',
+              color: '#DC2626',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1.25rem'
+            }}>
+              <AlertTriangle size={32} />
+            </div>
+            <h2 style={{ fontSize: '1.45rem', fontWeight: 800, marginBottom: '0.5rem', color: 'var(--ps-primary-dark)' }}>
+              Payment unsuccessful
+            </h2>
+            <p style={{ color: 'var(--ps-secondary-dark)', marginBottom: '1.25rem', fontSize: '0.95rem' }}>
+              Your parking spot has not been confirmed.
+            </p>
+            {paymentError && (
+              <div style={{
+                backgroundColor: '#FDE8E8',
+                color: '#9B1C1C',
+                border: '1px solid #F87171',
+                borderRadius: 'var(--ps-radius-sm)',
+                padding: '0.75rem 1rem',
+                marginBottom: '1.5rem',
+                fontSize: '0.85rem',
+                textAlign: 'left'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700, marginBottom: '0.25rem' }}>
+                  <AlertTriangle size={15} /> Gateway Notice
+                </div>
+                <span>{paymentError}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setPaymentState('IDLE');
+                  setPaymentError(null);
+                  setActiveView('review');
+                }}
+              >
+                Back to Review
+              </button>
+              <button
+                type="button"
+                className="btn btn-accent"
+                onClick={() => {
+                  setPaymentState('IDLE');
+                  setPaymentError(null);
+                }}
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (paymentState === 'CREATING_ORDER' || paymentState === 'PROCESSING') {
       return (
         <div className="container" style={{ maxWidth: '540px', padding: '2rem 1rem' }}>
-          <PaymentLoader amount={calculatedCost} message="Connecting to secure banking gateway..." />
+          <PaymentLoader
+            amount={calculatedCost}
+            message={paymentState === 'CREATING_ORDER' ? 'Initializing secure Razorpay order...' : 'Verifying payment signature with banking gateway...'}
+          />
         </div>
       );
     }
@@ -1961,22 +2161,54 @@ export function DriverExperience({
                     </div>
                   </div>
                 ) : (
-                  <div className="dynamic-qr-box">
-                    <div className="qr-code-graphic">
-                      <div className="qr-matrix-sim">
-                        {Array.from({ length: 36 }).map((_, i) => (
-                          <div key={i} className={`qr-block ${(i % 3 === 0 || i % 5 === 0) ? '' : 'empty'}`} />
-                        ))}
-                      </div>
-                      <span style={{ fontSize: '0.625rem', fontWeight: 800, marginTop: '6px', color: '#B2A240' }}>
-                        ORD-{selectedSpot.number}-{calculatedCost}
-                      </span>
+                  <div className="dynamic-qr-box" style={{ padding: '1.25rem', backgroundColor: '#FFFFFF', border: '1px solid var(--ps-secondary-light)', borderRadius: '8px' }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '50%',
+                      backgroundColor: 'var(--ps-primary-light)',
+                      color: 'var(--ps-primary-dark)',
+                      marginBottom: '0.75rem'
+                    }}>
+                      <QrCode size={36} />
                     </div>
-                    <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--ps-primary-dark)' }}>
-                      Scan with Google Pay, PhonePe, Paytm, or BHIM
+                    <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--ps-primary-dark)', marginBottom: '0.25rem' }}>
+                      Razorpay Dynamic UPI QR
                     </span>
-                    <span style={{ fontSize: '0.6875rem', color: '#707371', marginTop: '3px' }}>
-                      QR is unique to Order #{selectedSpot.number} · Valid for {formatTimer(holdSecondsLeft)}
+                    <span style={{
+                      display: 'inline-block',
+                      backgroundColor: '#FEF08A',
+                      color: '#854D0E',
+                      fontWeight: 800,
+                      fontSize: '0.85rem',
+                      padding: '0.2rem 0.65rem',
+                      borderRadius: '4px',
+                      marginBottom: '0.5rem'
+                    }}>
+                      Pay ₹{calculatedCost}
+                    </span>
+                    <p style={{ fontSize: '0.8125rem', color: '#707371', margin: '0 0 0.75rem', maxWidth: '380px' }}>
+                      A real transaction-specific dynamic QR code for exactly <strong>₹{calculatedCost}</strong> will be generated directly via the official Razorpay Checkout gateway.
+                    </p>
+                    <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                      {['Google Pay', 'PhonePe', 'Paytm', 'BHIM', 'CRED'].map((app) => (
+                        <span key={app} style={{
+                          fontSize: '0.6875rem',
+                          fontWeight: 700,
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: '4px',
+                          backgroundColor: '#F3F4F6',
+                          color: '#374151'
+                        }}>
+                          {app}
+                        </span>
+                      ))}
+                    </div>
+                    <span style={{ fontSize: '0.6875rem', color: '#707371' }}>
+                      Hold Session Active · Valid for {formatTimer(holdSecondsLeft)}
                     </span>
                   </div>
                 )}
@@ -1993,71 +2225,37 @@ export function DriverExperience({
             {/* Card Option */}
             {paymentMethod === 'CARD' && (
               <div>
-                <div className="card-brands-row">
+                <div className="card-brands-row" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
                   <span className="card-brand-badge">VISA</span>
                   <span className="card-brand-badge">Mastercard</span>
                   <span className="card-brand-badge">RuPay</span>
                   <span className="card-brand-badge">American Express</span>
+                  <span className="card-brand-badge">Maestro</span>
+                  <span className="card-brand-badge">Diners Club</span>
                 </div>
 
-                <div className="card-mock-form">
-                  <div>
-                    <label className="form-label" htmlFor="card-name-input">Cardholder Name</label>
-                    <input
-                      id="card-name-input"
-                      type="text"
-                      className="form-input"
-                      value={cardHolder}
-                      onChange={(e) => setCardHolder(e.target.value)}
-                      placeholder="Name as printed on card"
-                    />
+                <div style={{
+                  padding: '1.25rem',
+                  backgroundColor: '#F9FAFB',
+                  border: '1px solid #E5E7EB',
+                  borderRadius: '8px',
+                  marginBottom: '1rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <CreditCard size={20} style={{ color: 'var(--ps-primary-dark)' }} />
+                    <span style={{ fontWeight: 700, fontSize: '0.9375rem', color: 'var(--ps-primary-dark)' }}>
+                      Razorpay Secure Card Gateway
+                    </span>
                   </div>
-
-                  <div>
-                    <label className="form-label" htmlFor="card-number-input">Card Number</label>
-                    <input
-                      id="card-number-input"
-                      type="text"
-                      className="form-input"
-                      value={cardNumber}
-                      onChange={(e) => setCardNumber(e.target.value)}
-                      placeholder="•••• •••• •••• ••••"
-                      style={{ fontFamily: 'var(--ps-font-mono)', letterSpacing: '0.08em' }}
-                    />
-                  </div>
-
-                  <div className="card-fields-split">
-                    <div>
-                      <label className="form-label" htmlFor="card-expiry-input">Expiry Date</label>
-                      <input
-                        id="card-expiry-input"
-                        type="text"
-                        className="form-input"
-                        value={cardExpiry}
-                        onChange={(e) => setCardExpiry(e.target.value)}
-                        placeholder="MM/YY"
-                        style={{ fontFamily: 'var(--ps-font-mono)' }}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label" htmlFor="card-cvv-input">CVV</label>
-                      <input
-                        id="card-cvv-input"
-                        type="password"
-                        className="form-input"
-                        maxLength={4}
-                        placeholder="•••"
-                        defaultValue="•••"
-                        style={{ fontFamily: 'var(--ps-font-mono)' }}
-                      />
-                    </div>
-                  </div>
+                  <p style={{ fontSize: '0.8125rem', color: '#4B5563', lineHeight: 1.5, margin: 0 }}>
+                    Enter your card details safely in the official Razorpay PCI-DSS Level 1 compliant checkout interface. Supports all domestic and international Credit and Debit cards.
+                  </p>
                 </div>
 
                 <div className="payment-security-callout">
                   <Lock size={16} style={{ color: '#10B981', flexShrink: 0, marginTop: '1px' }} />
                   <span>
-                    <strong>PCI-DSS Certified:</strong> Card details are tokenized directly with the payment gateway. ParkSpot never receives or saves your CVV or card PIN.
+                    <strong>PCI-DSS Certified Security:</strong> ParkSpot never asks for, sees, or stores your Card Number, CVV, Card PIN, or OTP. All sensitive card processing is handled directly by Razorpay.
                   </span>
                 </div>
               </div>
@@ -2066,7 +2264,7 @@ export function DriverExperience({
             {/* Net Banking Option */}
             {paymentMethod === 'NETBANKING' && (
               <div>
-                <span className="form-label">Select Popular Indian Bank</span>
+                <span className="form-label">Select Your Bank</span>
                 <div className="bank-grid-select">
                   {[
                     'HDFC Bank',
@@ -2090,7 +2288,7 @@ export function DriverExperience({
                   ))}
                 </div>
 
-                <label className="form-label" htmlFor="other-banks-select">Or choose other supported bank</label>
+                <label className="form-label" htmlFor="other-banks-select">Or choose from 50+ other supported Indian banks</label>
                 <select
                   id="other-banks-select"
                   className="form-select"
@@ -2102,12 +2300,14 @@ export function DriverExperience({
                   <option value="IDFC FIRST Bank">IDFC FIRST Bank</option>
                   <option value="Federal Bank">Federal Bank</option>
                   <option value="Yes Bank">Yes Bank</option>
+                  <option value="RBL Bank">RBL Bank</option>
+                  <option value="South Indian Bank">South Indian Bank</option>
                 </select>
 
                 <div className="payment-security-callout">
                   <ShieldCheck size={16} style={{ color: '#10B981', flexShrink: 0, marginTop: '1px' }} />
                   <span>
-                    <strong>Bank-Grade Redirection:</strong> You will be securely redirected to {selectedBank}'s official Net Banking portal. ParkSpot never accesses your login passwords.
+                    <strong>Bank-Grade Redirection:</strong> You will be securely connected to {selectedBank}'s official Net Banking authentication portal via Razorpay. ParkSpot never collects your net banking password or OTP.
                   </span>
                 </div>
               </div>
@@ -2137,12 +2337,12 @@ export function DriverExperience({
             className="btn btn-accent btn-block"
             style={{ padding: '0.85rem', fontSize: '1rem', fontWeight: 700 }}
             onClick={handleExecutePayment}
-            disabled={paymentState === 'PROCESSING' || isHoldExpired}
+            disabled={paymentState === 'PROCESSING' || paymentState === 'CREATING_ORDER' || isHoldExpired}
           >
-            {paymentState === 'PROCESSING' ? (
-              <ActionLoader text="Verifying Payment with Gateway..." />
+            {paymentState === 'PROCESSING' || paymentState === 'CREATING_ORDER' ? (
+              <ActionLoader text="Connecting to Razorpay..." />
             ) : (
-              `Pay ₹${calculatedCost} & Confirm Spot`
+              `Pay ₹${calculatedCost} via ${paymentMethod === 'UPI' ? (upiMode === 'qr' ? 'Dynamic QR' : 'UPI') : paymentMethod === 'CARD' ? 'Card' : 'Net Banking'} & Confirm Spot`
             )}
           </button>
         </div>
