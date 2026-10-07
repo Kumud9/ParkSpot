@@ -98,12 +98,13 @@ app.use((_req, res) =>
 app.use(errorHandler);
 
 const port = Number(process.env.PORT || 4000);
+const host = '0.0.0.0';
 
 if (require.main === module) {
   connectDatabase()
     .then(() => {
-      app.listen(port, () => {
-        console.log(`ParkSpot API listening on port ${port}`);
+      app.listen(port, host, () => {
+        console.log(`ParkSpot API listening on ${host}:${port}`);
         startLifecycleWorker(60000);
       });
     })
