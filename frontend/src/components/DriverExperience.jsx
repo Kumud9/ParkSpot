@@ -41,7 +41,6 @@ import ItinerarySearchBar from './parking/ItinerarySearchBar';
 import './parking/driver-discovery.css';
 import { locationService } from '../services/locationService';
 import { receiptService } from '../services/receiptService';
-import { PaymentSuccessAnimation } from './payment/PaymentSuccessAnimation';
 import { NavigateToEntranceButton } from './driver/NavigateToEntranceButton';
 import { ParkingCountdown } from './driver/ParkingCountdown';
 import { FindMyCarModal } from './driver/FindMyCarModal';
@@ -342,7 +341,6 @@ export function DriverExperience({
   const [paymentError, setPaymentError] = useState(null);
   const [simulateFailure, setSimulateFailure] = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState(null);
-  const [showCoinAnimation, setShowCoinAnimation] = useState(false);
   const [upiMode, setUpiMode] = useState('vpa'); // 'vpa' | 'qr'
   const [upiId, setUpiId] = useState('');
   const [upiError, setUpiError] = useState('');
@@ -548,7 +546,6 @@ export function DriverExperience({
     if (isLiveConnected && selectedSpot?.id && /^[a-f\d]{24}$/i.test(selectedSpot.id)) {
       const currentToken = authStorage.getToken();
       if (!currentToken || !activeUser) {
-        setShowCoinAnimation(false);
         setPaymentState('FAILED');
         setPaymentError('Your session has expired. Please sign in again to continue your reservation.');
         return;
@@ -574,7 +571,6 @@ export function DriverExperience({
           await loadRazorpayScript();
           if (typeof window === 'undefined' || !window.Razorpay) {
             setPaymentState('FAILED');
-            setShowCoinAnimation(false);
             setPaymentError('Razorpay payment gateway failed to initialize. Please check your internet connection.');
             return;
           }
@@ -606,7 +602,6 @@ export function DriverExperience({
             modal: {
               ondismiss: () => {
                 setPaymentState('FAILED');
-                setShowCoinAnimation(false);
                 setPaymentError('Payment was cancelled. Your parking spot has not been confirmed. You can try again or select another payment method.');
               }
             },
@@ -654,16 +649,14 @@ export function DriverExperience({
                   onAddBooking && onAddBooking(newBooking);
                   setConfirmedBooking(newBooking);
                   setPaymentState('SUCCESS');
-                  setShowCoinAnimation(true);
+                  setActiveView('confirmed');
                   refreshFacilitySpots();
                 } else {
                   setPaymentState('FAILED');
-                  setShowCoinAnimation(false);
                   setPaymentError('Payment verification could not be completed.');
                 }
               } catch (verifyErr) {
                 setPaymentState('FAILED');
-                setShowCoinAnimation(false);
                 setPaymentError(verifyErr.message || 'Payment signature verification failed. Spot reservation was not confirmed.');
               }
             }
@@ -672,7 +665,6 @@ export function DriverExperience({
           const rzp = new window.Razorpay(options);
           rzp.on('payment.failed', (errResp) => {
             setPaymentState('FAILED');
-            setShowCoinAnimation(false);
             setPaymentError(errResp.error?.description || 'Payment was declined by payment gateway or bank.');
           });
           rzp.open();
@@ -691,7 +683,6 @@ export function DriverExperience({
             });
           } catch (verifyErr) {
             setPaymentState('FAILED');
-            setShowCoinAnimation(false);
             setPaymentError(verifyErr.message || 'Payment signature verification failed.');
             return;
           }
@@ -734,10 +725,9 @@ export function DriverExperience({
         onAddBooking && onAddBooking(newBooking);
         setConfirmedBooking(newBooking);
         setPaymentState('SUCCESS');
-        setShowCoinAnimation(true);
+        setActiveView('confirmed');
         refreshFacilitySpots();
       } catch (err) {
-        setShowCoinAnimation(false);
         const isConflict =
           err.status === 409 ||
           err.code === 'SPOT_ALREADY_BOOKED' ||
@@ -778,7 +768,6 @@ export function DriverExperience({
     setTimeout(() => {
       if (simulateFailure) {
         setPaymentState('FAILED');
-        setShowCoinAnimation(false);
         setPaymentError('Payment Verification Failed: Gateway declined payment authorization. Please try another payment instrument.');
         return;
       }
@@ -813,7 +802,7 @@ export function DriverExperience({
       onAddBooking && onAddBooking(newBooking);
       setConfirmedBooking(newBooking);
       setPaymentState('SUCCESS');
-      setShowCoinAnimation(true);
+      setActiveView('confirmed');
     }, 600);
   };
 
@@ -1914,19 +1903,6 @@ export function DriverExperience({
       );
     }
 
-    if (showCoinAnimation) {
-      return (
-        <PaymentSuccessAnimation
-          amount={calculatedCost}
-          facilityName={selectedFacility.name}
-          spotNumber={selectedSpot.number}
-          onComplete={() => {
-            setShowCoinAnimation(false);
-            setActiveView('confirmed');
-          }}
-        />
-      );
-    }
 
     if (paymentState === 'FAILED') {
       return (
