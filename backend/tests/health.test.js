@@ -22,6 +22,12 @@ test('health: liveness and readiness endpoints return valid status', async () =>
       });
     });
 
+  // 0. Test /health
+  const rootHealthRes = await get('/health');
+  assert.equal(rootHealthRes.status, 200);
+  assert.equal(rootHealthRes.body.status, 'ok');
+  assert.equal(rootHealthRes.body.service, 'parkspot-api');
+
   // 1. Test /api/health
   const healthRes = await get('/api/health');
   assert.equal(healthRes.status, 200);
