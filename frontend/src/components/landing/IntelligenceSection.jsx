@@ -8,10 +8,10 @@ const SCENARIOS = [
     label: 'Evening Horizon',
     window: '5 PM – 7 PM',
     stage1: {
-      tag: '01 · WHAT WE SEE',
+      tag: '01 · OBSERVE',
       title: 'Parking Activity',
       status: 'Rising volume detected',
-      sub: 'Recent parking patterns show demand beginning to rise.',
+      sub: 'System observes live arrival rates, bay dwell patterns, and check-in velocity.',
       bars: [
         { label: '12 PM', height: 28 },
         { label: '1 PM', height: 38 },
@@ -22,19 +22,19 @@ const SCENARIOS = [
       ]
     },
     stage2: {
-      tag: '02 · WHAT WE EXPECT',
+      tag: '02 · PREDICT',
       title: 'Demand Forecast',
       status: 'Upcoming peak period',
-      sub: 'ParkSpot identifies when demand is likely to tighten.',
+      sub: 'ML models forecast peak arrival windows and tightening bay capacity.',
       peakWindow: 'Expected peak: 5:30 PM — 6:45 PM',
       currentLabel: 'Current',
       forecastLabel: 'Forecast'
     },
     stage3: {
-      tag: '03 · WHAT TO DO',
-      title: 'Operator Action',
+      tag: '03 · RECOMMEND',
+      title: 'Operator Decision',
       status: 'Actionable guidance',
-      sub: 'The operator reviews guidance and makes the final decision.',
+      sub: 'Optimization suggests guidance. The operator reviews and makes the final decision.',
       recommendation: 'Prepare additional capacity on Level 2.',
       reason: 'Preserves ground-floor turnover as evening commuter departures overlap with retail arrivals.',
       actionLabel: 'Review recommendation'
@@ -45,10 +45,10 @@ const SCENARIOS = [
     label: 'Morning Inbound',
     window: '8 AM – 10 AM',
     stage1: {
-      tag: '01 · WHAT WE SEE',
+      tag: '01 · OBSERVE',
       title: 'Parking Activity',
       status: 'Commuter arrivals building',
-      sub: 'Early check-ins concentrate around perimeter entry gates.',
+      sub: 'Early check-ins concentrate around perimeter entry gates and primary lanes.',
       bars: [
         { label: '6 AM', height: 18 },
         { label: '7 AM', height: 32 },
@@ -59,19 +59,19 @@ const SCENARIOS = [
       ]
     },
     stage2: {
-      tag: '02 · WHAT WE EXPECT',
+      tag: '02 · PREDICT',
       title: 'Demand Forecast',
       status: 'Capacity tightening',
-      sub: 'Commercial permit decks anticipate rapid occupancy surge.',
+      sub: 'Commercial permit decks anticipate rapid occupancy surge across inbound windows.',
       peakWindow: 'Expected peak: 8:45 AM — 9:30 AM',
       currentLabel: 'Current',
       forecastLabel: 'Forecast'
     },
     stage3: {
-      tag: '03 · WHAT TO DO',
-      title: 'Operator Action',
+      tag: '03 · RECOMMEND',
+      title: 'Operator Decision',
       status: 'Actionable guidance',
-      sub: 'The operator reviews guidance and makes the final decision.',
+      sub: 'Optimization suggests guidance. The operator reviews and makes the final decision.',
       recommendation: 'Pre-designate East Lane for express permit access.',
       reason: 'Prevents entry bottlenecking during concurrent morning tenant arrivals.',
       actionLabel: 'Review recommendation'
@@ -82,10 +82,10 @@ const SCENARIOS = [
     label: 'Weekend Horizon',
     window: '1 PM – 4 PM',
     stage1: {
-      tag: '01 · WHAT WE SEE',
+      tag: '01 · OBSERVE',
       title: 'Parking Activity',
       status: 'Longer dwell durations observed',
-      sub: 'Midday arrivals show extended average dwell times.',
+      sub: 'Midday arrivals show extended average dwell times across retail zones.',
       bars: [
         { label: '11 AM', height: 35 },
         { label: '12 PM', height: 55 },
@@ -96,19 +96,19 @@ const SCENARIOS = [
       ]
     },
     stage2: {
-      tag: '02 · WHAT WE EXPECT',
+      tag: '02 · PREDICT',
       title: 'Demand Forecast',
       status: 'Turnover slowing down',
-      sub: 'Fewer bays releasing as retail and dining visitors linger.',
+      sub: 'Fewer bays releasing as retail and dining visitors linger into afternoon hours.',
       peakWindow: 'Expected peak: 1:30 PM — 3:45 PM',
       currentLabel: 'Current',
       forecastLabel: 'Forecast'
     },
     stage3: {
-      tag: '03 · WHAT TO DO',
-      title: 'Operator Action',
+      tag: '03 · RECOMMEND',
+      title: 'Operator Decision',
       status: 'Actionable guidance',
-      sub: 'The operator reviews guidance and makes the final decision.',
+      sub: 'Optimization suggests guidance. The operator reviews and makes the final decision.',
       recommendation: 'Direct oversized vehicles to Surface Lot B.',
       reason: 'Maintains open circulation and optimizes available spaces inside multi-level decks.',
       actionLabel: 'Review recommendation'
@@ -147,12 +147,12 @@ export function IntelligenceSection() {
       <div className="editorial-container">
         {/* Section Header */}
         <div className="editorial-section-header text-center compact-header">
-          <span className="editorial-eyebrow">PREDICTIVE OPERATIONS</span>
+          <span className="editorial-eyebrow">OBSERVE → PREDICT → RECOMMEND</span>
           <h2 className="editorial-section-heading">
-            Know what's coming next.
+            Predictive operations, human control.
           </h2>
           <p className="editorial-section-sub">
-            ParkSpot turns parking activity into an early signal — helping operators see rising demand before it becomes a problem.
+            ParkSpot observes parking activity, ML predicts upcoming demand, and optimization generates guidance — while operators make the final decision.
           </p>
         </div>
 
@@ -166,11 +166,11 @@ export function IntelligenceSection() {
           <div className="pred-topbar">
             <div className="pred-topbar-left">
               <span className="pred-live-dot" />
-              <span className="pred-topbar-title">OPERATIONAL INTELLIGENCE STORY</span>
+              <span className="pred-topbar-title">OBSERVE → PREDICT → RECOMMEND</span>
               <span className="pred-topbar-step">
-                {activeStage === 0 && 'Stage 1: Detecting activity patterns'}
-                {activeStage === 1 && 'Stage 2: Anticipating demand horizon'}
-                {activeStage === 2 && 'Stage 3: Operator evaluates suggested response'}
+                {activeStage === 0 && '01 · System observes parking activity'}
+                {activeStage === 1 && '02 · ML predicts upcoming demand horizon'}
+                {activeStage === 2 && '03 · Optimization suggests, Operator decides'}
               </span>
             </div>
 

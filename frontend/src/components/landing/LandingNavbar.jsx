@@ -72,7 +72,7 @@ export function LandingNavbar({ onOpenAuth }) {
           <button
             type="button"
             className="landing-nav-item"
-            onClick={() => scrollToSection('find-parking')}
+            onClick={() => scrollToSection('principles')}
           >
             About
           </button>
@@ -138,7 +138,7 @@ export function LandingNavbar({ onOpenAuth }) {
           <button
             type="button"
             className="landing-mobile-link"
-            onClick={() => scrollToSection('about')}
+            onClick={() => scrollToSection('principles')}
           >
             About
           </button>

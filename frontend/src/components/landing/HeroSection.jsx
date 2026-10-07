@@ -55,7 +55,7 @@ export function HeroSection({ onOpenAuth }) {
             </h1>
 
             <p className="editorial-hero-subhead">
-              Find a parking facility, choose your space,<br className="hero-subhead-break" />
+              Find a parking facility, choose your exact space,<br className="hero-subhead-break" />
               and reserve it before you arrive.
             </p>
 

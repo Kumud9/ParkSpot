@@ -163,7 +163,7 @@
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(112, 115, 113, 0.22);
   border-radius: 9999px;
-  padding: 0.55rem 1.25rem 0.55rem 1rem;
+  padding: 0.44rem 1.25rem 0.44rem 0.95rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -188,7 +188,7 @@
 }
 
 .landing-brand-logo-img {
-  height: 52px;
+  height: 40px;
   width: auto;
   max-width: none;
   object-fit: contain;
@@ -197,7 +197,7 @@
 
 .landing-brand-wordmark {
   font-family: var(--lp-font-display, 'Outfit', 'Inter', -apple-system, sans-serif);
-  font-size: 2.15rem;
+  font-size: 1.85rem;
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1;
@@ -215,26 +215,26 @@
 
 @media (max-width: 900px) {
   .landing-brand-logo-img {
-    height: 42px;
+    height: 36px;
   }
   .landing-brand-wordmark {
-    font-size: 1.75rem;
+    font-size: 1.6rem;
   }
 }
 
 @media (max-width: 600px) {
   .landing-brand-logo-img {
-    height: 36px;
+    height: 32px;
   }
   .landing-brand-wordmark {
-    font-size: 1.45rem;
+    font-size: 1.35rem;
   }
 }
 
 .landing-nav-center {
   display: flex;
   align-items: center;
-  gap: 2rem;
+  gap: 1.85rem;
   justify-content: center;
 }
 
@@ -242,10 +242,10 @@
   background: none;
   border: none;
   color: var(--lp-dark);
-  font-size: 0.9375rem;
+  font-size: 0.925rem;
   font-weight: 500;
   cursor: pointer;
-  padding: 0.35rem 0.5rem;
+  padding: 0.3rem 0.45rem;
   position: relative;
   transition: var(--lp-transition);
 }
@@ -275,7 +275,7 @@
 .landing-nav-actions {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.85rem;
   flex-shrink: 0;
 }
 
@@ -283,10 +283,10 @@
   background: none;
   border: none;
   color: var(--lp-dark);
-  font-size: 0.9375rem;
+  font-size: 0.925rem;
   font-weight: 600;
   cursor: pointer;
-  padding: 0.45rem 0.85rem;
+  padding: 0.35rem 0.75rem;
   transition: var(--lp-transition);
 }
 
@@ -302,8 +302,8 @@
   color: var(--lp-bg);
   border: none;
   border-radius: 9999px;
-  padding: 0.55rem 1.25rem;
-  font-size: 0.875rem;
+  padding: 0.48rem 1.15rem;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: var(--lp-transition);
@@ -332,7 +332,7 @@
    2. LARGE EDITORIAL HERO SECTION (PHOTOGRAPHY-LED PANEL)
    ========================================================================= */
 .editorial-hero {
-  padding: 1.5rem 2rem 3.5rem;
+  padding: 1.25rem 1.75rem 3.5rem;
   width: 100%;
   position: relative;
 }
@@ -346,8 +346,8 @@
 .editorial-hero-panel {
   position: relative;
   width: 100%;
-  min-height: 720px;
-  border-radius: 28px;
+  min-height: 700px;
+  border-radius: 30px;
   overflow: hidden;
   border: 1px solid rgba(37, 34, 27, 0.12);
   box-shadow: 0 20px 48px rgba(37, 34, 27, 0.08);
@@ -369,14 +369,14 @@
   display: block;
 }
 
-/* Subtle Dark/Neutral Gradient Overlay (Vignette behind text only) */
+/* Subtle Dark/Neutral Gradient Overlay (Vignette behind text only - softened) */
 .editorial-hero-overlay {
   position: absolute;
   inset: 0;
   z-index: 2;
   pointer-events: none;
-  background: linear-gradient(135deg, rgba(37, 34, 27, 0.82) 0%, rgba(37, 34, 27, 0.48) 45%, rgba(37, 34, 27, 0.08) 80%, transparent 100%),
-              linear-gradient(to top, rgba(37, 34, 27, 0.68) 0%, transparent 42%);
+  background: linear-gradient(135deg, rgba(28, 25, 20, 0.72) 0%, rgba(28, 25, 20, 0.40) 48%, rgba(28, 25, 20, 0.05) 82%, transparent 100%),
+              linear-gradient(to top, rgba(28, 25, 20, 0.56) 0%, transparent 42%);
 }
 
 /* Integrated Navigation Pill Slot inside Hero */
@@ -384,7 +384,7 @@
   position: relative;
   z-index: 20;
   width: 100%;
-  padding: 1.75rem 2rem 0;
+  padding: 1.5rem 1.75rem 0;
 }
 
 /* Dedicated Mobile Hero Image (Hidden on Desktop) */
@@ -396,7 +396,7 @@
 .editorial-hero-content {
   position: relative;
   z-index: 10;
-  padding: 4rem 3.5rem 4.5rem;
+  padding: 3.5rem 3.5rem 4rem;
   max-width: 680px;
   margin-top: auto;
   color: #F4F2E7;
@@ -404,22 +404,22 @@
 
 .editorial-hero-tag {
   display: inline-block;
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--lp-accent, #F3F456);
-  margin-bottom: 1.15rem;
+  margin-bottom: 1rem;
 }
 
 .editorial-hero-headline {
-  font-size: clamp(2.85rem, 4.8vw, 4.4rem);
+  font-size: clamp(2.85rem, 5vw, 4.35rem);
   font-weight: 800;
-  line-height: 1.08;
+  line-height: 1.06;
   letter-spacing: -0.035em;
   color: #F4F2E7;
-  margin-bottom: 1.35rem;
-  max-width: 560px;
+  margin-bottom: 1.15rem;
+  max-width: 580px;
 }
 
 .hero-heading-break {
@@ -427,11 +427,11 @@
 }
 
 .editorial-hero-subhead {
-  font-size: clamp(1.05rem, 1.4vw, 1.25rem);
+  font-size: clamp(1.05rem, 1.35vw, 1.2rem);
   color: rgba(244, 242, 231, 0.92);
-  line-height: 1.55;
+  line-height: 1.52;
   max-width: 480px;
-  margin-bottom: 2.25rem;
+  margin-bottom: 2rem;
   font-weight: 400;
 }
 
@@ -442,7 +442,7 @@
 .editorial-hero-buttons {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.95rem;
   flex-wrap: wrap;
 }
 
@@ -453,10 +453,10 @@
   gap: 0.5rem;
   background-color: var(--lp-accent, #F3F456);
   color: var(--lp-dark, #25221B);
-  border: 1px solid var(--lp-accent-dark, #B2A240);
+  border: none;
   border-radius: 9999px;
-  padding: 0.85rem 1.85rem;
-  font-size: 1rem;
+  padding: 0.8rem 1.75rem;
+  font-size: 0.95rem;
   font-weight: 700;
   cursor: pointer;
   transition: var(--lp-transition);
@@ -466,7 +466,7 @@
 .editorial-btn-find-parking:hover {
   background-color: #E8E940;
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(243, 244, 86, 0.38);
+  box-shadow: 0 6px 18px rgba(243, 244, 86, 0.32);
 }
 
 .editorial-btn-for-businesses {
@@ -474,14 +474,14 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background-color: rgba(244, 242, 231, 0.14);
+  background-color: rgba(40, 38, 33, 0.58);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: #F4F2E7;
-  border: 1px solid rgba(244, 242, 231, 0.4);
+  border: 1px solid rgba(244, 242, 231, 0.3);
   border-radius: 9999px;
-  padding: 0.85rem 1.85rem;
-  font-size: 1rem;
+  padding: 0.8rem 1.75rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: var(--lp-transition);
@@ -489,9 +489,9 @@
 }
 
 .editorial-btn-for-businesses:hover {
-  background-color: rgba(244, 242, 231, 0.26);
+  background-color: rgba(40, 38, 33, 0.78);
   color: #FFFFFF;
-  border-color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.5);
   transform: translateY(-2px);
 }
 
