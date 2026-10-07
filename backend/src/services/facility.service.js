@@ -140,7 +140,43 @@ async function getTenantFacilityById(id, organizationId) {
   if (!lot) {
     throw new AppError(404, 'FACILITY_NOT_FOUND', 'Facility not found in your organization.');
   }
-  return { ...lot, id: String(lot._id) };
+
+  const { Floor, ParkingSlot } = require('../models');
+  const [floors, slots] = await Promise.all([
+    Floor.find({ facilityId: lot._id, organizationId }).sort({ floorNumber: 1 }).lean(),
+    ParkingSlot.find({ lotId: lot._id, organizationId, isActive: true }).sort({ level: 1, number: 1 }).lean()
+  ]);
+
+  const totalSlots = slots.length;
+  const availableSlots = slots.filter((s) => s.status === 'AVAILABLE').length;
+  const occupiedSpots = slots.filter((s) => s.status === 'OCCUPIED').length;
+  const reservedSpots = slots.filter((s) => s.status === 'RESERVED').length;
+  const maintenanceSpots = slots.filter((s) => s.status === 'MAINTENANCE' || s.status === 'BLOCKED').length;
+
+  return {
+    ...lot,
+    id: String(lot._id),
+    totalSlots,
+    totalSpots: totalSlots,
+    availableSlots,
+    occupiedSpots,
+    reservedSpots,
+    maintenanceSpots,
+    floors: floors.map((f) => f.name),
+    floorDetails: floors.map((f) => ({ ...f, id: String(f._id) })),
+    slots: slots.map((s) => ({
+      ...s,
+      id: String(s._id),
+      _id: String(s._id),
+      level: s.level,
+      floor: s.level,
+      status: s.status,
+      type: s.type,
+      number: s.number,
+      coordinates: s.coordinates,
+      isActive: s.isActive
+    }))
+  };
 }
 
 async function createTenantFacility(organizationId, data, userId = null, ipAddress = null) {

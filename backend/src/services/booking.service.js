@@ -367,10 +367,101 @@ function stopLifecycleWorker() {
   }
 }
 
+async function listFacilityBookings({ facilityId, organizationId = null, status = null, search = null }) {
+  const query = { lotId: facilityId };
+  if (organizationId) {
+    query.organizationId = organizationId;
+  }
+  if (status && status !== 'ALL') {
+    if (status === 'CANCELLED' || status === 'CANCELED') {
+      query.status = 'CANCELED';
+    } else {
+      query.status = status;
+    }
+  }
+
+  const bookings = await Booking.find(query)
+    .populate('userId', 'name email phone')
+    .populate('slotId', 'number level type status')
+    .populate('floorId', 'name floorNumber')
+    .populate('vehicleId', 'registrationNumber vehicleType make model color')
+    .populate('lotId', 'name address city')
+    .sort({ startTime: -1 })
+    .lean();
+
+  return bookings.map((b) => {
+    const slotNum = b.slotId?.number || 'A1';
+    const floorName = b.floorId?.name || b.slotId?.level || 'Floor 1';
+    const facName = b.lotId?.name || 'Parking Facility';
+    const driverName = b.userId?.name || 'Driver';
+    const driverEmail = b.userId?.email || '';
+    const plate = b.vehicleId?.registrationNumber || 'DL 01 AB 4920';
+
+    return {
+      id: String(b._id),
+      _id: String(b._id),
+      driver: {
+        id: String(b.userId?._id || b.userId || ''),
+        name: driverName,
+        email: driverEmail,
+        phone: b.userId?.phone || null
+      },
+      driverName,
+      driverEmail,
+      vehicle: {
+        registrationNumber: plate,
+        type: b.vehicleId?.vehicleType || 'CAR',
+        make: b.vehicleId?.make || null,
+        model: b.vehicleId?.model || null,
+        color: b.vehicleId?.color || null
+      },
+      vehiclePlate: plate,
+      facility: {
+        id: String(b.lotId?._id || b.lotId || facilityId),
+        name: facName,
+        address: b.lotId?.address || '',
+        city: b.lotId?.city || ''
+      },
+      facilityId: String(b.lotId?._id || b.lotId || facilityId),
+      facilityName: facName,
+      facilityAddress: b.lotId?.address || '',
+      floor: {
+        id: String(b.floorId?._id || b.floorId || ''),
+        name: floorName,
+        floorNumber: b.floorId?.floorNumber || 1
+      },
+      floorName,
+      floorNumber: b.floorId?.floorNumber || 1,
+      spot: {
+        id: String(b.slotId?._id || b.slotId || ''),
+        number: slotNum,
+        type: b.slotId?.type || 'STANDARD',
+        status: b.slotId?.status || 'RESERVED'
+      },
+      spotId: String(b.slotId?._id || b.slotId || ''),
+      spotNumber: slotNum,
+      spotType: b.slotId?.type || 'STANDARD',
+      date: new Date(b.startTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+      entryTime: new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      exitTime: new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      startTime: new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      endTime: new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      startDateTime: b.startTime,
+      endDateTime: b.endTime,
+      duration: `${Math.max(1, Math.round((new Date(b.endTime) - new Date(b.startTime)) / 3600000))} hours`,
+      amount: b.totalAmount,
+      totalAmount: b.totalAmount,
+      status: b.status,
+      createdAt: b.createdAt
+    };
+  });
+}
+
 module.exports = {
   serialize,
   loadBooking,
   listUserBookings,
+  listFacilityBookings,
   getBookingById,
   createBooking,
   cancelBooking,

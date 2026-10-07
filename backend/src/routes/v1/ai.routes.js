@@ -1,10 +1,10 @@
 const express = require('express');
 const aiController = require('../../controllers/ai.controller');
-const { authenticate, authorize, requireTenant } = require('../../middleware/auth');
+const { authenticate, authorize, requireTenant, enforceOperatorFacility } = require('../../middleware/auth');
 
 const router = express.Router();
 
-router.use(authenticate, requireTenant);
+router.use(authenticate, requireTenant, enforceOperatorFacility);
 
 router.post('/insights', authorize('OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'), aiController.getInsights);
 router.post('/explain-recommendation/:id', authorize('OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'), aiController.explainRecommendation);

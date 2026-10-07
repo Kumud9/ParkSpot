@@ -108,25 +108,52 @@ const copilotService = require('../services/copilot.service');
 const chatSchema = z.object({
   messages: z.array(
     z.object({
-      role: z.enum(['user', 'assistant', 'system']),
-      content: z.string().trim().min(1).max(2000)
+      role: z.enum(['user', 'assistant', 'system', 'model']),
+      content: z.string().trim().min(1).max(4000)
     })
-  ).min(1),
-  facilityId: z.string().regex(/^[a-f\d]{24}$/i).optional().nullable()
+  ).min(1).optional(),
+  message: z.string().trim().min(1).max(4000).optional(),
+  history: z.array(z.any()).optional(),
+  facilityId: z.string().optional().nullable()
+}).refine(data => !!(data.messages || data.message), {
+  message: "Either 'messages' array or 'message' string is required"
 });
 
 async function chatCopilot(req, res, next) {
   try {
     const data = chatSchema.parse(req.body);
     const orgId = req.user.organizationId;
+    const resolvedFacilityId = req.facilityId || req.user.facilityId || data.facilityId;
+
+    let messages = data.messages;
+    if (!messages && data.message) {
+      const history = Array.isArray(data.history) ? data.history.map((h) => ({
+        role: h.role === 'user' ? 'user' : 'assistant',
+        content: String(h.content || '')
+      })) : [];
+      messages = [...history, { role: 'user', content: data.message }];
+    }
+
+    console.log(`[CopilotController] Incoming chat query (${messages.length} turns) from operator ${req.user.sub}, facility: ${resolvedFacilityId}`);
+
     const result = await copilotService.processCopilotChat({
       organizationId: orgId,
       userId: req.user.sub,
-      messages: data.messages,
-      facilityId: data.facilityId
+      messages,
+      facilityId: resolvedFacilityId,
+      user: req.user
     });
+
     res.json(result);
   } catch (error) {
+    console.error('[CopilotController] Copilot error:', error);
+    if (error.code === 'COPILOT_LLM_ERROR' || error.name === 'AppError') {
+      return res.status(error.statusCode || 502).json({
+        success: false,
+        error: error.code || 'COPILOT_LLM_ERROR',
+        message: error.message
+      });
+    }
     next(error);
   }
 }

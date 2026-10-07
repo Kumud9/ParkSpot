@@ -1,10 +1,10 @@
 const express = require('express');
 const optimizationController = require('../../controllers/optimization.controller');
-const { authenticate, authorize, requireTenant } = require('../../middleware/auth');
+const { authenticate, authorize, requireTenant, enforceOperatorFacility } = require('../../middleware/auth');
 
 const router = express.Router();
 
-router.use(authenticate, requireTenant);
+router.use(authenticate, requireTenant, enforceOperatorFacility);
 
 // Recommendations
 router.get('/recommendations', authorize('OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'), optimizationController.listRecommendations);

@@ -40,6 +40,12 @@ const userSchema = new Schema({
     default: null,
     index: true
   },
+  facilityId: {
+    type: Schema.Types.ObjectId,
+    ref: 'ParkingLot',
+    default: null,
+    index: true
+  },
   status: { type: String, enum: ['ACTIVE', 'SUSPENDED'], default: 'ACTIVE' }
 }, { timestamps: true });
 
@@ -56,6 +62,7 @@ userSchema.pre('save', function(next) {
     this.accountType = 'DRIVER';
     this.internalRole = null;
     this.organizationId = null;
+    this.facilityId = null;
     this.role = 'USER';
   }
   next();
@@ -66,6 +73,12 @@ const facilitySchema = new Schema({
   organizationId: {
     type: Schema.Types.ObjectId,
     ref: 'Organization',
+    default: null,
+    index: true
+  },
+  operatorId: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
     default: null,
     index: true
   },

@@ -15,7 +15,7 @@ import {
   INITIAL_AUDIT_LOGS,
   generateFloorSpots
 } from './data/mockData';
-import { api } from './services/api';
+import { api, normalizeFacility } from './services/api';
 import { ShieldAlert } from 'lucide-react';
 import './styles.css';
 import './components/landing/landing.css';
@@ -96,43 +96,57 @@ function AppContent() {
     let isMounted = true;
 
     async function syncUserBookings() {
-      if (!user || user.accountType !== 'DRIVER') {
+      if (!user) {
         if (isMounted) setBookings([]);
         return;
       }
 
-      try {
-        const liveBookings = await api.getBookings();
-        if (isMounted && liveBookings && Array.isArray(liveBookings)) {
-          const formatted = liveBookings.map((b) => ({
-            id: b.id || b._id,
-            facilityId: b.lotId || b.lot?.id || b.lot?._id,
-            facilityName: b.lot?.name || b.lotId?.name || 'Central Business District Parking',
-            facilityAddress: b.lot?.address || b.lotId?.address || '14 Connaught Place',
-            floor: b.floor?.name || b.slot?.level || b.slotId?.level || 'Floor 1',
-            spotNumber: b.slot?.number || b.slotId?.number || 'A1',
-            spotId: b.slot?.id || b.slot?._id || b.slotId,
-            lot: b.lot || null,
-            latitude: b.lot?.latitude ?? (b.lot?.location?.coordinates ? b.lot.location.coordinates[1] : null),
-            longitude: b.lot?.longitude ?? (b.lot?.location?.coordinates ? b.lot.location.coordinates[0] : null),
-            vehicle: b.vehicle || null,
-            startTime: new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            endTime: new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            startDateTime: b.startTime,
-            endDateTime: b.endTime,
-            duration: `${Math.round((new Date(b.endTime) - new Date(b.startTime)) / 3600000)} hours`,
-            status: b.status,
-            amount: b.totalAmount || 120,
-            qrCode: `PARK-${b.id || b._id}-CONFIRMED`,
-            verificationCode: `PS-PASS-${String(b.id || b._id).slice(-8).toUpperCase()}-${b.slot?.number || b.slotId?.number || 'A1'}`,
-            vehiclePlate: b.vehicle?.registrationNumber || b.vehiclePlate || ''
-          }));
-          setBookings(formatted);
-        } else if (isMounted) {
-          setBookings([]);
+      if (user.accountType === 'DRIVER') {
+        try {
+          const liveBookings = await api.getBookings();
+          if (isMounted && liveBookings && Array.isArray(liveBookings)) {
+            const formatted = liveBookings.map((b) => ({
+              id: b.id || b._id,
+              facilityId: b.lotId || b.lot?.id || b.lot?._id,
+              facilityName: b.lot?.name || b.lotId?.name || 'Central Business District Parking',
+              facilityAddress: b.lot?.address || b.lotId?.address || '14 Connaught Place',
+              floor: b.floor?.name || b.slot?.level || b.slotId?.level || 'Floor 1',
+              spotNumber: b.slot?.number || b.slotId?.number || 'A1',
+              spotId: b.slot?.id || b.slot?._id || b.slotId,
+              lot: b.lot || null,
+              latitude: b.lot?.latitude ?? (b.lot?.location?.coordinates ? b.lot.location.coordinates[1] : null),
+              longitude: b.lot?.longitude ?? (b.lot?.location?.coordinates ? b.lot.location.coordinates[0] : null),
+              vehicle: b.vehicle || null,
+              startTime: new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              endTime: new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              startDateTime: b.startTime,
+              endDateTime: b.endTime,
+              duration: `${Math.round((new Date(b.endTime) - new Date(b.startTime)) / 3600000)} hours`,
+              status: b.status,
+              amount: b.totalAmount || 120,
+              qrCode: `PARK-${b.id || b._id}-CONFIRMED`,
+              verificationCode: `PS-PASS-${String(b.id || b._id).slice(-8).toUpperCase()}-${b.slot?.number || b.slotId?.number || 'A1'}`,
+              vehiclePlate: b.vehicle?.registrationNumber || b.vehiclePlate || ''
+            }));
+            setBookings(formatted);
+          } else if (isMounted) {
+            setBookings([]);
+          }
+        } catch (e) {
+          if (isMounted) setBookings([]);
         }
-      } catch (e) {
-        if (isMounted) setBookings([]);
+      } else if (user.accountType === 'OPERATOR') {
+        try {
+          const facId = user.facilityId || user.facility?.id || (facilities[0]?.id);
+          if (facId && isLiveConnected) {
+            const facBookings = await api.getFacilityBookings(facId);
+            if (isMounted && Array.isArray(facBookings)) {
+              setBookings(facBookings);
+            }
+          }
+        } catch (e) {
+          console.info('[ParkSpot] Operator facility bookings sync notice:', e.message);
+        }
       }
     }
 
@@ -141,7 +155,7 @@ function AppContent() {
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [user, facilities, isLiveConnected]);
 
   // Sync audit logs for operator view
   useEffect(() => {
@@ -498,65 +512,31 @@ function AppContent() {
 
     const internalRoleDisplay = user.internalRole || (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(user.role) ? user.role : 'Manager');
 
+    // CORE RULE: ONE OPERATOR ACCOUNT = ONE PARKING FACILITY/LOT.
+    // Everything in the Operator Console must be scoped to their assigned facility.
+    const operatorFacility =
+      (user.facility ? normalizeFacility(user.facility) : null) ||
+      facilities.find((f) => f.id === user.facilityId || f._id === user.facilityId) ||
+      facilities[0];
+
+    const operatorFacilities = operatorFacility ? [operatorFacility] : [];
+
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-        <header className="app-header">
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div
-              className="brand"
-              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-              onClick={() => navigate('/operator')}
-              title="ParkSpot Operator"
-            >
-              <Logo variant="full" size="nav" theme="dark" />
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--ps-primary-light)' }}>
-                {user.name}
-              </div>
-              <div style={{ fontSize: '0.6875rem', color: 'rgba(244, 242, 231, 0.65)' }}>
-                Role: {internalRoleDisplay} · {user.organizationName || 'ParkSpot Operations'}
-              </div>
-            </div>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
-              onClick={() => {
-                logout();
-                navigate('/login');
-              }}
-            >
-              Sign Out
-            </button>
-          </div>
-        </header>
-
-        <main style={{ flex: 1 }}>
-          <OperatorExperience
-            facilities={facilities}
-            events={events}
-            auditLogs={auditLogs}
-            bookings={bookings}
-            onUpdateSpotStatus={handleUpdateSpotStatus}
-            onAddSpot={handleAddSpot}
-            isLiveConnected={isLiveConnected}
-            activeUser={user}
-            activeTab={operatorTab}
-            onTabChange={setOperatorTab}
-          />
-        </main>
-
-        <Footer
-          onNavigate={(targetMode, view) => {
-            if (targetMode === 'operator') {
-              navigate('/operator');
-            } else {
-              navigate('/driver');
-              if (view) setDriverView(view);
-            }
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <OperatorExperience
+          facilities={operatorFacilities}
+          events={events}
+          auditLogs={auditLogs}
+          bookings={bookings}
+          onUpdateSpotStatus={handleUpdateSpotStatus}
+          onAddSpot={handleAddSpot}
+          isLiveConnected={isLiveConnected}
+          activeUser={user}
+          activeTab={operatorTab}
+          onTabChange={setOperatorTab}
+          onSignOut={() => {
+            logout();
+            navigate('/login');
           }}
         />
       </div>

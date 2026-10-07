@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ParkingMap } from './ParkingMap';
-import { api } from '../services/api';
+import { api, normalizeSpot } from '../services/api';
 import { Logo } from './shared/Logo';
 import { ComponentLoader, ActionLoader } from './shared/Loading';
 import { ParkSpotCopilot } from './operator/ParkSpotCopilot';
@@ -63,13 +63,14 @@ export function OperatorExperience({
   isLiveConnected = false,
   activeUser = null,
   activeTab = null,
-  onTabChange = null
+  onTabChange = null,
+  onSignOut = null
 }) {
   // -------------------------------------------------------------------------
-  // CORE OPERATIONAL STATE
+  // CORE OPERATIONAL STATE (ONE OPERATOR = ONE FACILITY)
   // -------------------------------------------------------------------------
   const [selectedFacility, setSelectedFacility] = useState(() => facilities[0] || null);
-  const [activeFloor, setActiveFloor] = useState('Floor 1');
+  const [activeFloor, setActiveFloor] = useState('Ground Floor');
   const [internalTab, setInternalTab] = useState('dashboard');
   const operatorTab = activeTab !== null && activeTab !== undefined ? activeTab : internalTab;
   const setOperatorTab = (tab) => {
@@ -77,6 +78,14 @@ export function OperatorExperience({
     if (onTabChange) onTabChange(tab);
   };
   const activeRole = activeUser?.internalRole || (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(activeUser?.role) ? activeUser.role : 'OPERATOR');
+
+  // Live facility bookings & reservation inspection state
+  const [liveFacilityBookings, setLiveFacilityBookings] = useState([]);
+  const [inspectedBooking, setInspectedBooking] = useState(null);
+
+  // Live facility spots & occupancy state
+  const [liveFacilitySpots, setLiveFacilitySpots] = useState(null);
+  const [liveOccupancy, setLiveOccupancy] = useState(null);
 
   // Floating ParkSpot Copilot state
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
@@ -89,27 +98,91 @@ export function OperatorExperience({
     }
   }, [operatorTab, onTabChange]);
 
-  // Update selected facility when facilities list changes
+  // Scoped to the single assigned facility
   useEffect(() => {
     if (!selectedFacility && facilities.length > 0) {
       setSelectedFacility(facilities[0]);
     } else if (selectedFacility && facilities.length > 0) {
-      const match = facilities.find((f) => f.id === selectedFacility.id);
+      const match = facilities.find((f) => f.id === selectedFacility.id || f._id === selectedFacility.id);
       if (match) setSelectedFacility(match);
     }
   }, [facilities]);
 
+  // Fetch real facility bookings, spots & occupancy for this operator's single facility
+  useEffect(() => {
+    let isSubscribed = true;
+    const facId = selectedFacility?.id || selectedFacility?._id || activeUser?.facilityId;
+    if (facId) {
+      // 1. Fetch live facility bookings
+      api.getFacilityBookings(facId)
+        .then((res) => {
+          if (isSubscribed && res?.data) {
+            setLiveFacilityBookings(res.data);
+          } else if (isSubscribed && Array.isArray(res)) {
+            setLiveFacilityBookings(res);
+          }
+        })
+        .catch((err) => {
+          console.warn('[OperatorExperience] Could not fetch facility bookings:', err);
+        });
+
+      // 2. Fetch live facility spots (Floor -> Spot telemetry)
+      api.listFacilitySpots(facId)
+        .then((spotsList) => {
+          if (isSubscribed && Array.isArray(spotsList) && spotsList.length > 0) {
+            setLiveFacilitySpots(spotsList.map((s) => normalizeSpot(s, selectedFacility?.hourlyRate)));
+          }
+        })
+        .catch((err) => {
+          console.warn('[OperatorExperience] Could not fetch facility spots:', err);
+        });
+
+      // 3. Fetch live facility occupancy breakdown
+      api.getOccupancy(facId)
+        .then((occ) => {
+          if (isSubscribed && occ) {
+            setLiveOccupancy(occ);
+            if (occ.spots && Array.isArray(occ.spots) && occ.spots.length > 0) {
+              setLiveFacilitySpots(occ.spots.map((s) => normalizeSpot(s, selectedFacility?.hourlyRate)));
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn('[OperatorExperience] Could not fetch occupancy:', err);
+        });
+    }
+    return () => { isSubscribed = false; };
+  }, [selectedFacility?.id, selectedFacility?._id, activeUser?.facilityId]);
+
+  const effectiveBookings = useMemo(() => {
+    if (liveFacilityBookings && liveFacilityBookings.length > 0) {
+      return liveFacilityBookings;
+    }
+    return bookings;
+  }, [liveFacilityBookings, bookings]);
+
+  // Spots on current floor & facility spots
+  const facilitySpots = useMemo(() => {
+    if (liveFacilitySpots && liveFacilitySpots.length > 0) {
+      return liveFacilitySpots;
+    }
+    return selectedFacility?.spots || [];
+  }, [liveFacilitySpots, selectedFacility?.spots]);
+
   // Derive distinct floors for selected facility
   const facilityFloors = useMemo(() => {
+    if (liveOccupancy?.floors && liveOccupancy.floors.length > 0) {
+      return liveOccupancy.floors.map((f) => f.name);
+    }
+    if (facilitySpots && facilitySpots.length > 0) {
+      const distinct = Array.from(new Set(facilitySpots.map((s) => s.floor || s.level).filter(Boolean)));
+      if (distinct.length > 0) return distinct;
+    }
     if (selectedFacility?.floors && selectedFacility.floors.length > 0) {
       return selectedFacility.floors;
     }
-    if (selectedFacility?.spots && selectedFacility.spots.length > 0) {
-      const distinct = Array.from(new Set(selectedFacility.spots.map((s) => s.floor).filter(Boolean)));
-      if (distinct.length > 0) return distinct;
-    }
-    return ['Floor 1', 'Floor 2', 'Floor 3'];
-  }, [selectedFacility]);
+    return ['Ground Floor', 'Level 1', 'Level 2'];
+  }, [liveOccupancy, facilitySpots, selectedFacility]);
 
   useEffect(() => {
     if (facilityFloors.length > 0 && !facilityFloors.includes(activeFloor)) {
@@ -117,20 +190,30 @@ export function OperatorExperience({
     }
   }, [facilityFloors, activeFloor]);
 
-  // Spots on current floor & facility spots
-  const facilitySpots = useMemo(() => selectedFacility?.spots || [], [selectedFacility]);
   const currentFloorSpots = useMemo(() => {
-    return facilitySpots.filter((s) => s.floor === activeFloor);
+    return facilitySpots.filter((s) => s.floor === activeFloor || s.level === activeFloor);
   }, [facilitySpots, activeFloor]);
 
-  // Real-time capacity breakdown
-  const totalBays = facilitySpots.length || selectedFacility?.totalSpots || 48;
-  const availableBays = facilitySpots.filter((s) => s.status === 'AVAILABLE').length;
-  const occupiedBays = facilitySpots.filter((s) => s.status === 'OCCUPIED').length;
-  const reservedBays = facilitySpots.filter((s) => s.status === 'RESERVED').length;
-  const maintenanceBays = facilitySpots.filter((s) => s.status === 'MAINTENANCE').length;
-  const blockedBays = facilitySpots.filter((s) => s.status === 'BLOCKED').length;
-  const occupancyPercent = totalBays > 0 ? Math.round(((occupiedBays + reservedBays) / totalBays) * 100) : 65;
+  // Real-time capacity breakdown based on true ParkingSlot records
+  const totalBays = facilitySpots.length || selectedFacility?.totalSpots || selectedFacility?.totalSlots || liveOccupancy?.summary?.totalSpots || 48;
+  const availableBays = facilitySpots.length > 0
+    ? facilitySpots.filter((s) => s.status === 'AVAILABLE').length
+    : (liveOccupancy?.summary?.available ?? 0);
+  const occupiedBays = facilitySpots.length > 0
+    ? facilitySpots.filter((s) => s.status === 'OCCUPIED').length
+    : (liveOccupancy?.summary?.occupied ?? 0);
+  const reservedBays = facilitySpots.length > 0
+    ? facilitySpots.filter((s) => s.status === 'RESERVED').length
+    : (liveOccupancy?.summary?.reserved ?? 0);
+  const maintenanceBays = facilitySpots.length > 0
+    ? facilitySpots.filter((s) => s.status === 'MAINTENANCE').length
+    : (liveOccupancy?.summary?.maintenance ?? 0);
+  const blockedBays = facilitySpots.length > 0
+    ? facilitySpots.filter((s) => s.status === 'BLOCKED').length
+    : (liveOccupancy?.summary?.blocked ?? 0);
+  const occupancyPercent = totalBays > 0
+    ? Math.round(((occupiedBays + reservedBays) / totalBays) * 100)
+    : (liveOccupancy?.summary?.occupancyPercentage ? Math.round(liveOccupancy.summary.occupancyPercentage) : 0);
 
   // -------------------------------------------------------------------------
   // SPOT SELECTION & OPERATOR OVERRIDES
@@ -147,7 +230,11 @@ export function OperatorExperience({
     setSpotActionLoading(true);
     setSpotFeedback(null);
 
-    // 1. Optimistic UI update via parent handler
+    // 1. Optimistic UI update via live state and parent handler
+    setLiveFacilitySpots((prev) => {
+      if (!prev) return prev;
+      return prev.map((s) => (s.id === spotId || s._id === spotId ? { ...s, status: newStatus } : s));
+    });
     onUpdateSpotStatus && onUpdateSpotStatus(selectedFacility.id, activeFloor, spotId, newStatus);
     setSelectedSpotForAction((prev) => prev ? { ...prev, status: newStatus } : null);
 
@@ -513,36 +600,36 @@ export function OperatorExperience({
     fetchAnalytics();
   }, [selectedFacility?.id]);
 
-  // Derived facility performance rankings for Analytics comparison
-  const rankedFacilities = useMemo(() => {
-    return (facilities || []).map((fac) => {
-      const spots = fac.spots || [];
-      const total = spots.length || fac.totalSpots || 48;
-      const occupied = spots.filter((s) => s.status === 'OCCUPIED' || s.status === 'RESERVED').length;
-      const util = total > 0 ? Math.round((occupied / total) * 100) : 55;
-      let status = 'Balanced';
+  // Derived floor & zone performance metrics for this single facility
+  const facilityFloorStats = useMemo(() => {
+    return facilityFloors.map((fl) => {
+      const flSpots = facilitySpots.filter((s) => (s.floor || 'Floor 1') === fl);
+      const total = flSpots.length;
+      const occupied = flSpots.filter((s) => s.status === 'OCCUPIED' || s.status === 'RESERVED').length;
+      const available = flSpots.filter((s) => s.status === 'AVAILABLE').length;
+      const maintenance = flSpots.filter((s) => s.status === 'MAINTENANCE' || s.status === 'BLOCKED').length;
+      const util = total > 0 ? Math.round((occupied / total) * 100) : 0;
+      let status = 'Balanced Utilization';
       let badgeClass = 'available';
       if (util >= 75) {
-        status = 'Busiest / High Demand';
+        status = 'High Demand Level';
         badgeClass = 'occupied';
-      } else if (util < 50) {
-        status = 'Underutilized';
+      } else if (util < 40) {
+        status = 'Underutilized Zone';
         badgeClass = 'selected';
       }
       return {
-        id: fac.id || fac._id,
-        name: fac.name,
-        city: fac.city,
+        floor: fl,
         total,
         occupied,
-        available: Math.max(0, total - occupied),
+        available,
+        maintenance,
         util,
-        rate: fac.hourlyRate || 40,
         status,
         badgeClass
       };
-    }).sort((a, b) => b.util - a.util);
-  }, [facilities]);
+    });
+  }, [facilityFloors, facilitySpots]);
 
   // Derived forecast summary for Operator-First Demand Forecast
   const forecastSummary = useMemo(() => {
@@ -689,22 +776,27 @@ export function OperatorExperience({
   const [bookingSearch, setBookingSearch] = useState('');
 
   const filteredBookings = useMemo(() => {
-    return bookings.filter((b) => {
-      if (bookingFilter === 'ACTIVE' && b.status !== 'CONFIRMED') return false;
+    return effectiveBookings.filter((b) => {
+      if (bookingFilter === 'ACTIVE' && b.status !== 'CONFIRMED' && b.status !== 'ACTIVE') return false;
       if (bookingFilter === 'COMPLETED' && b.status !== 'COMPLETED') return false;
       if (bookingFilter === 'CANCELLED' && b.status !== 'CANCELLED' && b.status !== 'CANCELED') return false;
       if (bookingSearch.trim()) {
         const q = bookingSearch.toLowerCase().trim();
         return (
           b.id?.toLowerCase().includes(q) ||
+          b._id?.toLowerCase().includes(q) ||
           b.vehiclePlate?.toLowerCase().includes(q) ||
+          b.vehicle?.plate?.toLowerCase().includes(q) ||
+          b.driverName?.toLowerCase().includes(q) ||
+          b.driver?.name?.toLowerCase().includes(q) ||
+          b.user?.name?.toLowerCase().includes(q) ||
           b.facilityName?.toLowerCase().includes(q) ||
           b.spotNumber?.toLowerCase().includes(q)
         );
       }
       return true;
     });
-  }, [bookings, bookingFilter, bookingSearch]);
+  }, [effectiveBookings, bookingFilter, bookingSearch]);
 
   const operatorGreetingName = activeUser?.name?.split(' ')[0] || 'Operator';
 
@@ -712,11 +804,44 @@ export function OperatorExperience({
     <div className="operator-layout-container">
       {/* 1. SIDEBAR: Structured Mobility Hierarchy */}
       <aside className="operator-sidebar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', padding: '0 0.75rem 1.5rem', borderBottom: '1px solid var(--ps-secondary-light)', marginBottom: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', padding: '0 0.75rem 1.25rem', borderBottom: '1px solid var(--ps-secondary-light)', marginBottom: '1rem' }}>
           <Logo variant="mark" size={26} />
           <div>
-            <div style={{ fontWeight: 800, fontSize: '0.9375rem', color: 'var(--ps-primary-dark)' }}>ParkSpot</div>
+            <div style={{ fontWeight: 800, fontSize: '1rem', letterSpacing: '0.04em', color: 'var(--ps-primary-dark)' }}>PARKSPOT</div>
             <div className="metadata" style={{ fontSize: '0.6875rem' }}>Operations Console</div>
+          </div>
+        </div>
+
+        {/* [Operator / Facility identity] */}
+        <div style={{
+          backgroundColor: 'var(--ps-secondary-light)',
+          borderRadius: 'var(--ps-radius-sm)',
+          padding: '0.75rem 0.85rem',
+          marginBottom: '1.25rem',
+          border: '1px solid rgba(0,0,0,0.06)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+            <Building2 size={14} style={{ color: 'var(--ps-accent-dark)', flexShrink: 0 }} />
+            <div style={{ fontWeight: 700, fontSize: '0.8125rem', color: 'var(--ps-primary-dark)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedFacility?.name || 'Parul University Parking'}>
+              {selectedFacility?.name || 'Parul University Parking'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '0.6875rem', color: 'var(--ps-secondary-dark)', fontWeight: 600 }}>
+              {activeUser?.name || 'Operator'}
+            </span>
+            <span style={{
+              fontSize: '0.625rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              padding: '0.15rem 0.4rem',
+              borderRadius: '4px',
+              backgroundColor: 'var(--ps-primary-dark)',
+              color: '#FFFFFF'
+            }}>
+              Operator
+            </span>
           </div>
         </div>
 
@@ -749,7 +874,7 @@ export function OperatorExperience({
               <CalendarCheck size={16} />
               <span>Bookings</span>
             </div>
-            <span className="operator-sidebar-badge">{bookings.length}</span>
+            <span className="operator-sidebar-badge">{effectiveBookings.length}</span>
           </button>
           <button
             className={`operator-sidebar-item ${operatorTab === 'events' ? 'active' : ''}`}
@@ -780,21 +905,12 @@ export function OperatorExperience({
         <div className="operator-sidebar-group">
           <div className="operator-sidebar-group-title">Parking</div>
           <button
-            className={`operator-sidebar-item ${operatorTab === 'occupancy' ? 'active' : ''}`}
-            onClick={() => setOperatorTab('occupancy')}
-          >
-            <div className="operator-sidebar-item-left">
-              <Building2 size={16} />
-              <span>Facilities</span>
-            </div>
-          </button>
-          <button
-            className={`operator-sidebar-item ${operatorTab === 'floors' ? 'active' : ''}`}
+            className={`operator-sidebar-item ${operatorTab === 'floors' || operatorTab === 'occupancy' ? 'active' : ''}`}
             onClick={() => setOperatorTab('floors')}
           >
             <div className="operator-sidebar-item-left">
               <Layers size={16} />
-              <span>Parking Floors</span>
+              <span>Floors</span>
             </div>
           </button>
           <button
@@ -883,30 +999,40 @@ export function OperatorExperience({
         {/* DASHBOARD HEADER */}
         <header className="operator-header">
           <div className="operator-header-left">
-            <span className="operator-greeting">Good morning, {operatorGreetingName}</span>
-            <select
-              className="operator-facility-select"
-              value={selectedFacility?.id || ''}
-              onChange={(e) => {
-                const f = facilities.find((fac) => fac.id === e.target.value);
-                if (f) setSelectedFacility(f);
-              }}
-            >
-              {facilities.map((fac) => (
-                <option key={fac.id} value={fac.id}>{fac.name} ({fac.city || 'Delhi'})</option>
-              ))}
-            </select>
+            <div>
+              <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--ps-primary-dark)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Building2 size={20} style={{ color: 'var(--ps-accent-dark)' }} />
+                {selectedFacility?.name || 'Parul University Parking'}
+              </h1>
+              <div className="metadata" style={{ fontSize: '0.8125rem', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <span>{facilityFloors.length} Floors · {totalBays} Spaces</span>
+                <span>•</span>
+                <span>{selectedFacility?.city || 'Campus Facility'}</span>
+                <span>•</span>
+                <span style={{ color: 'var(--ps-state-available)', fontWeight: 600 }}>Operating</span>
+              </div>
+            </div>
           </div>
 
-          <div className="operator-header-right">
+          <div className="operator-header-right" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--ps-primary-dark)' }}>
                 {activeUser?.name || 'Operator'}
               </div>
               <div style={{ fontSize: '0.6875rem', color: 'var(--ps-secondary-dark)' }}>
-                {activeRole} · {activeUser?.organizationName || 'Operations'}
+                {activeUser?.email || 'operator@parkspot.test'} · Operator
               </div>
             </div>
+            {onSignOut && (
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={onSignOut}
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                title="Sign out of Operator Console"
+              >
+                Sign Out
+              </button>
+            )}
           </div>
         </header>
 
@@ -1906,37 +2032,64 @@ export function OperatorExperience({
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Booking ID</th>
-                    <th>Vehicle Plate</th>
-                    <th>Facility & Space</th>
-                    <th>Window</th>
-                    <th>Duration</th>
+                    <th>Driver</th>
+                    <th>Vehicle</th>
+                    <th>Floor</th>
+                    <th>Spot</th>
+                    <th>Date</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
                     <th>Amount</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredBookings.map((b) => (
-                    <tr key={b.id}>
-                      <td><strong style={{ fontFamily: 'var(--ps-font-mono)' }}>#{b.id}</strong></td>
-                      <td><span style={{ fontFamily: 'var(--ps-font-mono)', fontWeight: 600 }}>{b.vehiclePlate || 'DL 01 AB 4920'}</span></td>
-                      <td>
-                        <div><strong>{b.spotNumber}</strong> ({b.floor})</div>
-                        <div className="metadata">{b.facilityName}</div>
-                      </td>
-                      <td>
-                        <div>{b.startTime}</div>
-                        <div className="metadata">until {b.endTime}</div>
-                      </td>
-                      <td>{b.duration}</td>
-                      <td><strong>₹{b.amount}</strong></td>
-                      <td>
-                        <span className={`status-tag ${b.status === 'CONFIRMED' ? 'available' : b.status === 'COMPLETED' ? 'selected' : 'blocked'}`}>
-                          {b.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredBookings.map((b) => {
+                    const formattedDate = b.date || (b.startTime ? new Date(b.startTime).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Today');
+                    const formattedEntry = b.entryTime || (b.startTime ? (typeof b.startTime === 'string' && b.startTime.includes(':') && !b.startTime.includes('T') ? b.startTime : new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : '09:00 AM');
+                    const formattedExit = b.exitTime || (b.endTime ? (typeof b.endTime === 'string' && b.endTime.includes(':') && !b.endTime.includes('T') ? b.endTime : new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : '11:00 AM');
+
+                    return (
+                      <tr
+                        key={b.id || b._id}
+                        onClick={() => setInspectedBooking(b)}
+                        style={{ cursor: 'pointer' }}
+                        title="Click to view Driver → Booking → Facility → Floor → Spot details"
+                      >
+                        <td>
+                          <div style={{ fontWeight: 600, color: 'var(--ps-primary-dark)' }}>
+                            {b.driver?.name || b.driverName || 'Driver'}
+                          </div>
+                          <div className="metadata" style={{ fontSize: '0.6875rem' }}>
+                            #{String(b.id || b._id).slice(-6)}
+                          </div>
+                        </td>
+                        <td>
+                          <span style={{ fontFamily: 'var(--ps-font-mono)', fontWeight: 600 }}>
+                            {b.vehicle?.plate || b.vehiclePlate || 'DL 01 AB 4920'}
+                          </span>
+                          <div className="metadata" style={{ fontSize: '0.6875rem' }}>
+                            {b.vehicle?.model || 'Sedan'}
+                          </div>
+                        </td>
+                        <td><strong>{b.floor || 'Floor 1'}</strong></td>
+                        <td>
+                          <span className="status-tag available" style={{ fontFamily: 'var(--ps-font-mono)', fontWeight: 700 }}>
+                            {b.spotNumber || 'A-01'}
+                          </span>
+                        </td>
+                        <td>{formattedDate}</td>
+                        <td><span style={{ fontFamily: 'var(--ps-font-mono)' }}>{formattedEntry}</span></td>
+                        <td><span style={{ fontFamily: 'var(--ps-font-mono)' }}>{formattedExit}</span></td>
+                        <td><strong>₹{b.amount}</strong></td>
+                        <td>
+                          <span className={`status-tag ${b.status === 'CONFIRMED' || b.status === 'ACTIVE' ? 'available' : b.status === 'COMPLETED' ? 'selected' : 'blocked'}`}>
+                            {b.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2295,29 +2448,29 @@ export function OperatorExperience({
             </div>
           </div>
 
-          {/* E. Facility Comparison */}
+          {/* E. Floor & Level Capacity Breakdown */}
           <div className="analytics-facility-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
               <div>
-                <span className="eyebrow">FACILITY BENCHMARK</span>
+                <span className="eyebrow">FACILITY LEVEL & FLOOR BREAKDOWN</span>
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: '0.15rem 0 0', color: 'var(--ps-primary-dark)' }}>
-                  Facility Utilization Ranking
+                  Level Utilization & Capacity Allocation
                 </h3>
               </div>
               <span className="metadata" style={{ fontSize: '0.8125rem' }}>
-                Comparing {rankedFacilities.length} operational sites
+                Scoped to {selectedFacility?.name || 'Assigned Facility'}
               </span>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {rankedFacilities.map((fac, idx) => (
-                <div key={fac.id || idx} className="facility-rank-item">
+              {facilityFloorStats.map((flItem) => (
+                <div key={flItem.floor} className="facility-rank-item">
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: 'var(--ps-primary-dark)' }}>
-                      {fac.name}
+                      {flItem.floor}
                     </div>
                     <div className="metadata" style={{ fontSize: '0.75rem' }}>
-                      {fac.city} · {fac.totalSpots} Total Spaces · ₹{fac.rate}/hr
+                      {flItem.total} Configured Spaces · {flItem.maintenance} Under Service
                     </div>
                   </div>
 
@@ -2326,30 +2479,30 @@ export function OperatorExperience({
                       <div
                         className="facility-rank-meter-fill"
                         style={{
-                          width: `${fac.util}%`,
-                          backgroundColor: fac.util >= 75 ? 'var(--ps-state-occupied)' : fac.util < 50 ? 'var(--ps-accent-dark)' : 'var(--ps-primary-dark)'
+                          width: `${flItem.util}%`,
+                          backgroundColor: flItem.util >= 75 ? 'var(--ps-state-occupied)' : flItem.util < 40 ? 'var(--ps-accent-dark)' : 'var(--ps-primary-dark)'
                         }}
                       />
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6875rem', color: 'var(--ps-secondary-dark)', marginTop: '4px' }}>
-                      <span>{fac.occupied} occupied</span>
-                      <span>{fac.available} available</span>
+                      <span>{flItem.occupied} occupied / reserved</span>
+                      <span>{flItem.available} available</span>
                     </div>
                   </div>
 
                   <div style={{ textAlign: 'right' }}>
                     <span style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--ps-primary-dark)' }}>
-                      {fac.util}%
+                      {flItem.util}%
                     </span>
                     <span className="metadata" style={{ fontSize: '0.75rem', display: 'block' }}>utilized</span>
                   </div>
 
                   <div style={{ textAlign: 'right' }}>
                     <span
-                      className={`status-tag ${fac.badgeClass}`}
+                      className={`status-tag ${flItem.badgeClass}`}
                       style={{ fontSize: '0.6875rem', whiteSpace: 'nowrap' }}
                     >
-                      {fac.status}
+                      {flItem.status}
                     </span>
                   </div>
                 </div>
@@ -2941,22 +3094,13 @@ export function OperatorExperience({
             <form onSubmit={handleCreateSpotSubmit}>
               <div className="form-group" style={{ marginBottom: '1rem' }}>
                 <label className="form-label">Facility</label>
-                <select
-                  className="form-select"
-                  value={newSpotFacilityId}
-                  onChange={(e) => {
-                    setNewSpotFacilityId(e.target.value);
-                    const target = facilities.find((f) => f.id === e.target.value);
-                    if (target?.floors && target.floors.length > 0) {
-                      setNewSpotFloor(target.floors[0]);
-                    }
-                  }}
-                  required
-                >
-                  {facilities.map((fac) => (
-                    <option key={fac.id} value={fac.id}>{fac.name}</option>
-                  ))}
-                </select>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={selectedFacility?.name || 'Parul University Parking'}
+                  disabled
+                  style={{ backgroundColor: 'var(--ps-secondary-light)', cursor: 'not-allowed', color: 'var(--ps-primary-dark)', fontWeight: 600 }}
+                />
               </div>
 
               <div className="form-group" style={{ marginBottom: '1rem' }}>
@@ -3092,6 +3236,113 @@ export function OperatorExperience({
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* BOOKING DRILL-DOWN MODAL: Driver → Booking → Facility → Floor → Exact Spot */}
+      {inspectedBooking && (
+        <div className="modal-backdrop" onClick={() => setInspectedBooking(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '640px' }}>
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">RESERVATION AUDIT</span>
+                <h3 style={{ margin: '0.2rem 0 0', fontSize: '1.25rem', fontWeight: 800 }}>Driver Booking Inspection</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setInspectedBooking(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Hierarchy Path Banner */}
+              <div style={{
+                backgroundColor: 'var(--ps-secondary-light)',
+                borderRadius: 'var(--ps-radius-sm)',
+                padding: '0.85rem 1rem',
+                border: '1px solid rgba(0,0,0,0.06)'
+              }}>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ps-secondary-dark)', marginBottom: '0.5rem' }}>
+                  Operational Path (Driver → Booking → Facility → Floor → Exact Spot)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', fontSize: '0.8125rem' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--ps-primary-dark)' }}>{inspectedBooking.driver?.name || inspectedBooking.driverName || 'Driver'}</span>
+                  <ChevronRight size={14} color="var(--ps-secondary-dark)" />
+                  <span style={{ fontFamily: 'var(--ps-font-mono)', fontWeight: 600 }}>#{String(inspectedBooking.id || inspectedBooking._id).slice(-8)}</span>
+                  <ChevronRight size={14} color="var(--ps-secondary-dark)" />
+                  <span style={{ fontWeight: 600, color: 'var(--ps-accent-dark)' }}>{selectedFacility?.name || inspectedBooking.facilityName}</span>
+                  <ChevronRight size={14} color="var(--ps-secondary-dark)" />
+                  <span>{inspectedBooking.floor || 'Floor 1'}</span>
+                  <ChevronRight size={14} color="var(--ps-secondary-dark)" />
+                  <span className="status-tag available" style={{ fontFamily: 'var(--ps-font-mono)', fontWeight: 800 }}>{inspectedBooking.spotNumber || 'A-01'}</span>
+                </div>
+              </div>
+
+              {/* Detail Panels */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+                <div className="card" style={{ padding: '0.85rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--ps-secondary-dark)', marginBottom: '0.5rem' }}>
+                    Driver & Vehicle
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8125rem' }}>
+                    <div><strong>Name:</strong> {inspectedBooking.driver?.name || inspectedBooking.driverName || 'Verified Driver'}</div>
+                    {inspectedBooking.driver?.email && (
+                      <div className="metadata"><strong>Email:</strong> {inspectedBooking.driver.email}</div>
+                    )}
+                    {inspectedBooking.driver?.phone && (
+                      <div className="metadata"><strong>Phone:</strong> {inspectedBooking.driver.phone}</div>
+                    )}
+                    <div style={{ marginTop: '0.35rem' }}>
+                      <strong>Plate:</strong>{' '}
+                      <span style={{ fontFamily: 'var(--ps-font-mono)', fontWeight: 700 }}>
+                        {inspectedBooking.vehicle?.plate || inspectedBooking.vehiclePlate || 'DL 01 AB 4920'}
+                      </span>
+                    </div>
+                    <div className="metadata"><strong>Vehicle:</strong> {inspectedBooking.vehicle?.model || 'Sedan'} ({inspectedBooking.vehicle?.type || 'STANDARD'})</div>
+                  </div>
+                </div>
+
+                <div className="card" style={{ padding: '0.85rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--ps-secondary-dark)', marginBottom: '0.5rem' }}>
+                    Space & Time Window
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8125rem' }}>
+                    <div><strong>Facility:</strong> {selectedFacility?.name || inspectedBooking.facilityName}</div>
+                    <div><strong>Floor Level:</strong> {inspectedBooking.floor || 'Floor 1'}</div>
+                    <div><strong>Assigned Bay:</strong> <strong style={{ color: 'var(--ps-state-available)' }}>{inspectedBooking.spotNumber}</strong></div>
+                    <div><strong>Total Amount:</strong> <strong>₹{inspectedBooking.amount}</strong></div>
+                    <div><strong>Status:</strong> <span className="status-tag available">{inspectedBooking.status}</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  const spNumber = inspectedBooking.spotNumber;
+                  setInspectedBooking(null);
+                  setOperatorTab('map');
+                  if (spNumber) {
+                    const sp = facilitySpots.find((s) => s.number === spNumber);
+                    if (sp) setSelectedSpotForAction(sp);
+                  }
+                }}
+              >
+                Inspect Bay on Live Map
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => setInspectedBooking(null)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

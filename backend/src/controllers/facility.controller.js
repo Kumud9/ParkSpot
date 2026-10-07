@@ -2,6 +2,7 @@ const { z } = require('zod');
 const facilityService = require('../services/facility.service');
 const occupancyService = require('../services/occupancy.service');
 const locationService = require('../services/location.service');
+const bookingService = require('../services/booking.service');
 const { AppError } = require('../errors');
 
 const windowSchema = z.object({
@@ -88,8 +89,40 @@ async function getPublicById(req, res, next) {
 // Tenant B2B endpoints
 async function listTenant(req, res, next) {
   try {
-    const lots = await facilityService.listTenantFacilities(req.user.organizationId);
+    let lots;
+    if (req.user.accountType === 'OPERATOR') {
+      const targetFacilityId = req.facilityId || req.user.facilityId;
+      if (targetFacilityId) {
+        const lot = await facilityService.getTenantFacilityById(targetFacilityId, req.user.organizationId);
+        lots = [lot];
+      } else {
+        lots = await facilityService.listTenantFacilities(req.user.organizationId);
+        if (lots.length > 0) {
+          lots = [lots[0]];
+        }
+      }
+    } else {
+      lots = await facilityService.listTenantFacilities(req.user.organizationId);
+    }
     res.json({ lots, facilities: lots });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getFacilityBookings(req, res, next) {
+  try {
+    const facilityId = req.params.facilityId || req.params.id || req.facilityId;
+    if (req.user.accountType === 'OPERATOR' && req.facilityId && String(facilityId) !== String(req.facilityId)) {
+      throw new AppError(403, 'FORBIDDEN_FACILITY', 'Access denied: You are only authorized to view bookings for your assigned parking facility.');
+    }
+    const bookings = await bookingService.listFacilityBookings({
+      facilityId,
+      organizationId: req.user.organizationId,
+      status: req.query.status || null,
+      search: req.query.search || null
+    });
+    res.json({ bookings });
   } catch (error) {
     next(error);
   }
@@ -186,6 +219,7 @@ module.exports = {
   listPublic,
   getPublicById,
   listTenant,
+  getFacilityBookings,
   createTenant,
   updateTenant,
   getOccupancy,

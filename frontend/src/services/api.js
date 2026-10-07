@@ -115,9 +115,10 @@ export function normalizeSpot(slot, defaultRate = 40) {
     status = 'RESERVED';
   }
   return {
-    id: slot._id ? String(slot._id) : slot.id,
+    id: slot._id ? String(slot._id) : (slot.id || `spot-${slot.number}`),
     number: slot.number,
-    floor: slot.level || slot.floor || 'Floor 1',
+    floor: slot.level || slot.floor || 'Ground Floor',
+    level: slot.level || slot.floor || 'Ground Floor',
     type: slot.type || 'STANDARD',
     status: status,
     rate: slot.hourlyRate || defaultRate,
@@ -130,16 +131,26 @@ export function normalizeSpot(slot, defaultRate = 40) {
  * Normalizes backend facility into frontend format
  */
 export function normalizeFacility(lot) {
-  const totalSlots = lot.totalSlots ?? (lot.slots ? lot.slots.length : 48);
-  const availableSlots = lot.availableSlots ?? (lot.slots ? lot.slots.filter((s) => s.status === 'AVAILABLE' && s.available !== false).length : 18);
-  const occupiedSpots = lot.slots ? lot.slots.filter((s) => s.status === 'OCCUPIED' || s.available === false).length : Math.max(0, Math.floor(totalSlots * 0.5));
-  const reservedSpots = lot.slots ? lot.slots.filter((s) => s.status === 'RESERVED').length : Math.max(0, Math.floor(totalSlots * 0.1));
-  const maintenanceSpots = lot.slots ? lot.slots.filter((s) => s.status === 'MAINTENANCE' || s.status === 'BLOCKED').length : 1;
+  // Map spots if present in either slots or spots format
+  const rawSpots = (lot.slots && Array.isArray(lot.slots) && lot.slots.length > 0)
+    ? lot.slots
+    : (Array.isArray(lot.spots) && lot.spots.length > 0 ? lot.spots : null);
 
-  // Map spots if present
-  const spots = lot.slots && lot.slots.length > 0
-    ? lot.slots.map((s) => normalizeSpot(s, lot.hourlyRate))
-    : null;
+  const spots = rawSpots ? rawSpots.map((s) => normalizeSpot(s, lot.hourlyRate)) : null;
+
+  const totalSlots = spots ? spots.length : (lot.totalSlots ?? lot.capacity ?? 48);
+  const availableSlots = spots
+    ? spots.filter((s) => s.status === 'AVAILABLE' && s.available !== false).length
+    : (lot.availableSlots ?? Math.round(totalSlots * 0.5));
+  const occupiedSpots = spots
+    ? spots.filter((s) => s.status === 'OCCUPIED' || s.available === false).length
+    : (lot.occupiedSpots ?? Math.round(totalSlots * 0.25));
+  const reservedSpots = spots
+    ? spots.filter((s) => s.status === 'RESERVED').length
+    : (lot.reservedSpots ?? Math.round(totalSlots * 0.18));
+  const maintenanceSpots = spots
+    ? spots.filter((s) => s.status === 'MAINTENANCE' || s.status === 'BLOCKED').length
+    : (lot.maintenanceSpots ?? Math.round(totalSlots * 0.06));
 
   // Extract available floors from spots or lot
   const floorSet = new Set();
@@ -151,26 +162,28 @@ export function normalizeFacility(lot) {
       if (sp.floor) floorSet.add(sp.floor);
     });
   }
-  const floors = floorSet.size > 0 ? Array.from(floorSet) : ['Floor 1', 'Floor 2', 'Floor 3'];
+  const floors = floorSet.size > 0 ? Array.from(floorSet) : ['Ground Floor', 'Level 1', 'Level 2'];
 
   return {
     id: lot._id ? String(lot._id) : (lot.id || 'fac-default'),
+    _id: lot._id ? String(lot._id) : (lot.id || 'fac-default'),
     name: lot.name,
     address: lot.address,
-    city: lot.city || 'Delhi',
+    city: lot.city || 'Vadodara',
     distance: lot.distance || '0.5 km away',
-    openStatus: lot.openingTime === '00:00' && lot.closingTime === '23:59' ? 'Open 24/7' : `Open · ${lot.openingTime || '08:00'} - ${lot.closingTime || '22:00'}`,
-    openingHours: lot.openingTime === '00:00' && lot.closingTime === '23:59' ? '24 Hours' : `${lot.openingTime || '08:00'} – ${lot.closingTime || '22:00'}`,
+    openStatus: lot.openingTime === '00:00' && lot.closingTime === '23:59' ? 'Open 24/7' : `Open · ${lot.openingTime || '07:00'} - ${lot.closingTime || '22:00'}`,
+    openingHours: lot.openingTime === '00:00' && lot.closingTime === '23:59' ? '24 Hours' : `${lot.openingTime || '07:00'} – ${lot.closingTime || '22:00'}`,
     rating: lot.rating || 4.8,
     reviewsCount: lot.reviewsCount || 128,
-    hourlyRate: lot.hourlyRate || 50,
-    dailyRate: lot.dailyRate || 350,
+    hourlyRate: lot.hourlyRate || 20,
+    dailyRate: lot.dailyRate || 120,
     totalSpots: totalSlots,
-    availableSpots: availableSlots,
+    totalSlots: totalSlots,
+    availableSlots: availableSlots,
     occupiedSpots: occupiedSpots,
     reservedSpots: reservedSpots,
     maintenanceSpots: maintenanceSpots,
-    type: lot.description ? lot.description.slice(0, 32) : 'Multi-level Facility',
+    type: lot.description ? lot.description.slice(0, 32) : 'Campus Multi-level Parking',
     spots: spots,
     floors: floors
   };
@@ -497,11 +510,26 @@ export const api = {
 
   /**
    * Operator: Create parking spot in facility
+  /**
+   * Operator: Get bookings for facility
+   */
+  async getFacilityBookings(facilityId, params = {}) {
+    await api.ensureOperatorAuth();
+    const token = authStorage.getOperatorToken();
+    const query = new URLSearchParams(params).toString();
+    const data = await request(`/v1/facilities/${facilityId}/bookings${query ? `?${query}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    return data.bookings || [];
+  },
+
+  /**
+   * Operator: Create parking spot in facility
    */
   async createSpot(facilityId, spotData) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/admin/lots/${facilityId}/slots`, {
+    const data = await request(`/v1/facilities/${facilityId}/spots`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify(spotData)
@@ -516,7 +544,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/admin/lots/${facilityId}/slots${query ? `?${query}` : ''}`, {
+    const data = await request(`/v1/facilities/${facilityId}/spots${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data.slots || data.spots || [];
@@ -654,11 +682,16 @@ export const api = {
   async chatCopilot({ messages, facilityId = null }) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
+    console.log('[API.chatCopilot] Initiating POST /v1/ai/copilot/chat', {
+      turns: messages?.length,
+      facilityId
+    });
     const data = await request('/v1/ai/copilot/chat', {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify({ messages, facilityId })
     });
+    console.log('[API.chatCopilot] Response from backend:', data);
     return data;
   },
 
@@ -770,5 +803,19 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data?.overview || null;
+  },
+
+  /**
+   * Operator: Copilot AI Chat with real Gemini LLM
+   */
+  async chatCopilot({ messages, facilityId = null }) {
+    await api.ensureOperatorAuth();
+    console.log('[ParkSpot API] Sending chat message to /v1/ai/copilot/chat', { messageCount: messages?.length, facilityId });
+    const data = await request('/v1/ai/copilot/chat', {
+      method: 'POST',
+      body: JSON.stringify({ messages, facilityId })
+    });
+    console.log('[ParkSpot API] Copilot response:', data);
+    return data;
   }
 };

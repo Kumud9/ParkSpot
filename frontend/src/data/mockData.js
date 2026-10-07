@@ -1,5 +1,25 @@
 export const INITIAL_FACILITIES = [
   {
+    id: 'fac-parul',
+    name: 'Parul University Parking',
+    address: 'Parul University Gate 1, Limda, Waghodia',
+    city: 'Vadodara',
+    distance: '0.2 km away',
+    openStatus: 'Open · 07:00 – 22:00',
+    openingHours: '07:00 – 22:00',
+    rating: 4.9,
+    reviewsCount: 412,
+    hourlyRate: 20,
+    dailyRate: 120,
+    totalSpots: 142,
+    availableSpots: 92,
+    occupiedSpots: 42,
+    reservedSpots: 6,
+    maintenanceSpots: 2,
+    floors: ['Floor 1', 'Floor 2', 'Floor 3'],
+    type: 'Campus Multi-level Parking'
+  },
+  {
     id: 'fac-1',
     name: 'Metro Center Grand Terminal',
     address: '100 Connaught Place, Central Wing',
@@ -16,6 +36,7 @@ export const INITIAL_FACILITIES = [
     occupiedSpots: 24,
     reservedSpots: 4,
     maintenanceSpots: 2,
+    floors: ['Floor 1', 'Floor 2', 'Floor 3'],
     type: 'Multi-level Indoor Garage'
   },
   {

@@ -97,15 +97,35 @@ export function ParkSpotCopilot({
     setIsLoading(true);
 
     try {
-      // Send last 6 conversation turns
+      // Send last 8 conversation turns for rich contextual memory
       const conversationPayload = newMessages
-        .slice(-6)
+        .slice(-8)
         .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
+
+      console.log('[ParkSpotCopilot] Outgoing request to Copilot API:', {
+        turns: conversationPayload.length,
+        facility: selectedFacility?.name || 'Assigned Facility',
+        question: text
+      });
 
       const response = await api.chatCopilot({
         messages: conversationPayload,
         facilityId: selectedFacility?.id || null
       });
+
+      console.log('[ParkSpotCopilot] Received backend response:', response);
+
+      if (response?.success === false || response?.error) {
+        const errorMsg = {
+          id: `asst-err-${Date.now()}`,
+          role: 'assistant',
+          content: `[Copilot Error] ${response.error || 'COPILOT_LLM_ERROR'}: ${response.message || 'LLM generation failed.'}`,
+          isError: true,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+        return;
+      }
 
       const assistantMsg = {
         id: `asst-${Date.now()}`,
@@ -114,25 +134,22 @@ export function ParkSpotCopilot({
         recommendation: response?.recommendation || null,
         keyMetrics: response?.keyMetrics || null,
         quickActions: response?.quickActions || [],
-        source: response?.source || null,
+        source: response?.source || 'GEMINI',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
-      console.warn('[ParkSpotCopilot] Chat request notice:', err.message);
+      console.error('[ParkSpotCopilot] Chat request failed:', err);
 
-      const fallbackMsg = {
+      const errorMsg = {
         id: `asst-err-${Date.now()}`,
         role: 'assistant',
-        content: `I am currently analyzing live database metrics for ${selectedFacility?.name || 'your facilities'}. Current occupancy and operational status remain active.`,
-        keyMetrics: {
-          facility: selectedFacility?.name || 'Primary Facility',
-          status: 'Operating'
-        },
+        content: `[Copilot Error] ${err.message || 'Unable to connect to Copilot LLM service.'}`,
+        isError: true,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
-      setMessages((prev) => [...prev, fallbackMsg]);
+      setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
     }

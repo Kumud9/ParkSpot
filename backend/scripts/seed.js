@@ -80,7 +80,16 @@ async function seed() {
       organizationId: urbanPark._id
     },
     {
-      name: 'UrbanPark Operations Staff',
+      name: 'Priya Shah',
+      email: 'operator@parkspot.test',
+      passwordHash: devPasswordHash,
+      accountType: 'OPERATOR',
+      internalRole: 'OPERATOR',
+      role: 'OPERATOR',
+      organizationId: urbanPark._id
+    },
+    {
+      name: 'Priya Shah',
       email: 'operator@urbanpark.test',
       passwordHash: devPasswordHash,
       accountType: 'OPERATOR',
@@ -89,7 +98,7 @@ async function seed() {
       organizationId: urbanPark._id
     },
     {
-      name: 'Priya Sharma (Driver)',
+      name: 'Rahul Verma (Driver)',
       email: 'user@parkspot.test',
       passwordHash: devPasswordHash,
       accountType: 'DRIVER',
@@ -242,7 +251,7 @@ async function seed() {
       organizationId: urbanPark._id
     },
     {
-      name: 'Parul Campus Mobility Hub',
+      name: 'Parul University Parking',
       address: 'Parul University Gate 1, Limda, Waghodia',
       city: 'Vadodara',
       description: 'Designated campus parking for students, faculty and visitors.',
@@ -310,11 +319,11 @@ async function seed() {
     );
     seededFacilities.push(facility);
 
-    // 4. Create Multi-Floor Architecture per Facility
+    // 4. Create Multi-Floor Architecture per Facility (3 Floors x 16 Spots = 48 Spaces)
     const floorsData = [
-      { name: 'Ground Floor', floorNumber: 0, capacity: 12 },
-      { name: 'Level 1', floorNumber: 1, capacity: 12 },
-      { name: 'Level 2', floorNumber: 2, capacity: 12 }
+      { name: 'Ground Floor', floorNumber: 0, capacity: 16 },
+      { name: 'Level 1', floorNumber: 1, capacity: 16 },
+      { name: 'Level 2', floorNumber: 2, capacity: 16 }
     ];
 
     for (const fData of floorsData) {
@@ -325,22 +334,24 @@ async function seed() {
       );
 
       // 5. Create Parking Spots with Spatial Coordinates
-      const existingSlots = await ParkingSlot.countDocuments({ lotId: facility._id, floorId: floor._id });
-      if (existingSlots === 0) {
-        const slotsToInsert = [];
-        for (let i = 1; i <= fData.capacity; i++) {
-          const slotNum = `${floor.floorNumber === 0 ? 'G' : `L${floor.floorNumber}`}-${String(i).padStart(2, '0')}`;
+      const existingSlots = await ParkingSlot.find({ lotId: facility._id, floorId: floor._id }).lean();
+      const existingNumbers = new Set(existingSlots.map((s) => s.number));
+      const slotsToInsert = [];
+
+      for (let i = 1; i <= fData.capacity; i++) {
+        const slotNum = `${floor.floorNumber === 0 ? 'G' : `L${floor.floorNumber}`}-${String(i).padStart(2, '0')}`;
+        if (!existingNumbers.has(slotNum)) {
           const type = i % 6 === 0 ? 'EV' : i % 9 === 0 ? 'ACCESSIBLE' : i % 4 === 0 ? 'COMPACT' : 'STANDARD';
 
           // Realistic operational distribution across each floor:
           // - Parked cars (OCCUPIED): slots 2, 5, 7, 11
-          // - Active reservations (RESERVED): slots 4, 9
+          // - Active reservations (RESERVED): slots 4, 9, 14
           // - Maintenance inspection (MAINTENANCE): slot 12
-          // - Open bays ready for driver reservation (AVAILABLE): slots 1, 3, 6, 8, 10
+          // - Open bays ready for driver reservation (AVAILABLE): slots 1, 3, 6, 8, 10, 13, 15, 16
           let slotStatus = 'AVAILABLE';
           if (i === 2 || i === 5 || i === 7 || i === 11) {
             slotStatus = 'OCCUPIED';
-          } else if (i === 4 || i === 9) {
+          } else if (i === 4 || i === 9 || i === 14) {
             slotStatus = 'RESERVED';
           } else if (i === 12) {
             slotStatus = 'MAINTENANCE';
@@ -364,6 +375,8 @@ async function seed() {
             }
           });
         }
+      }
+      if (slotsToInsert.length > 0) {
         await ParkingSlot.insertMany(slotsToInsert);
       }
     }
@@ -452,6 +465,40 @@ async function seed() {
       entityId: String(firstFacility._id),
       newValue: { name: firstFacility.name }
     });
+    // 9. Assign Operators to Specific Parking Facilities (ONE OPERATOR = ONE FACILITY)
+    const parulFacility = seededFacilities.find((f) => f.name === 'Parul University Parking') || firstFacility;
+    if (parulFacility) {
+      await User.updateMany(
+        { email: { $in: ['operator@parkspot.test', 'operator@urbanpark.test'] } },
+        { facilityId: parulFacility._id, name: 'Priya Shah' }
+      );
+      await ParkingLot.findByIdAndUpdate(parulFacility._id, {
+        operatorId: createdUsers['operator@parkspot.test']?._id || createdUsers['operator@urbanpark.test']?._id
+      });
+
+      // Ensure Parul facility has a confirmed booking for driver & operator view
+      const parulSlot = await ParkingSlot.findOne({ lotId: parulFacility._id, isActive: true });
+      if (parulSlot) {
+        const pNow = new Date();
+        await Booking.findOneAndUpdate(
+          { slotId: parulSlot._id, status: 'CONFIRMED' },
+          {
+            userId: driverUser._id,
+            lotId: parulFacility._id,
+            slotId: parulSlot._id,
+            floorId: parulSlot.floorId,
+            vehicleId: sampleVehicle._id,
+            organizationId: urbanPark._id,
+            startTime: new Date(pNow.getTime() - 30 * 60000),
+            endTime: new Date(pNow.getTime() + 2.5 * 3600000),
+            type: 'HOURLY',
+            status: 'CONFIRMED',
+            totalAmount: 60
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      }
+    }
   }
 
   console.log('Seed completed successfully with B2B hierarchy.');

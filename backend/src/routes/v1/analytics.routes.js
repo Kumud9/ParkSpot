@@ -1,10 +1,10 @@
 const express = require('express');
 const analyticsController = require('../../controllers/analytics.controller');
-const { authenticate, authorize, requireTenant } = require('../../middleware/auth');
+const { authenticate, authorize, requireTenant, enforceOperatorFacility } = require('../../middleware/auth');
 
 const router = express.Router();
 
-router.use(authenticate, requireTenant);
+router.use(authenticate, requireTenant, enforceOperatorFacility);
 
 // Operational analytics
 router.get('/summary', authorize('OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'), analyticsController.getSummary);
