@@ -2,7 +2,69 @@
 // Bridges Driver & Operator components to the Node.js Express backend
 // Provides graceful progressive enhancement with fallback to initial mock data.
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+// Base backend host origin from env (e.g. 'https://parkspot-backend.onrender.com')
+// In local development, defaults to '' so requests use relative paths proxied by Vite
+const RAW_ENV_URL = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+
+/**
+ * Resolves a full request URL given an endpoint path.
+ * Ensures the canonical /api/v1 prefix is consistently applied when calling the backend,
+ * gracefully handles paths with or without /api or /v1, and supports root endpoints like /health.
+ */
+export function buildApiUrl(endpoint) {
+  if (!endpoint) return RAW_ENV_URL || '';
+
+  // Return as-is if already an absolute HTTP/HTTPS URL
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  // Root health endpoints
+  if (path === '/health' || path === '/api/health' || path.startsWith('/api/health/')) {
+    if (!RAW_ENV_URL) {
+      return path.startsWith('/api/') ? path : `/api${path}`;
+    }
+    return `${RAW_ENV_URL}${path}`;
+  }
+
+  // Legacy lots endpoints support
+  if (path === '/lots' || path.startsWith('/lots/')) {
+    const lotPath = `/api${path}`;
+    return RAW_ENV_URL ? `${RAW_ENV_URL}${lotPath}` : lotPath;
+  }
+
+  // Canonicalize path under /api/v1
+  let canonicalPath = path;
+  if (canonicalPath.startsWith('/api/v1/')) {
+    // already full canonical path
+  } else if (canonicalPath.startsWith('/v1/')) {
+    canonicalPath = `/api${canonicalPath}`;
+  } else if (canonicalPath.startsWith('/api/')) {
+    // e.g. /api/auth/login -> /api/v1/auth/login
+    canonicalPath = `/api/v1${canonicalPath.slice(4)}`;
+  } else {
+    // e.g. /auth/login -> /api/v1/auth/login
+    canonicalPath = `/api/v1${canonicalPath}`;
+  }
+
+  if (RAW_ENV_URL) {
+    if (RAW_ENV_URL.endsWith('/api/v1')) {
+      const strippedPath = canonicalPath.replace(/^\/api\/v1/, '');
+      return `${RAW_ENV_URL}${strippedPath}`;
+    }
+    if (RAW_ENV_URL.endsWith('/api')) {
+      const strippedPath = canonicalPath.replace(/^\/api/, '');
+      return `${RAW_ENV_URL}${strippedPath}`;
+    }
+    return `${RAW_ENV_URL}${canonicalPath}`;
+  }
+
+  return canonicalPath;
+}
+
+export const API_BASE = RAW_ENV_URL ? `${RAW_ENV_URL}/api/v1` : '/api/v1';
 
 // Storage keys
 const AUTH_TOKEN_KEY = 'parkspot_auth_token';
@@ -50,7 +112,7 @@ export const authStorage = {
  * Standard fetch helper with error handling & JSON parsing
  */
 async function request(endpoint, options = {}) {
-  const url = `${API_BASE}${endpoint}`;
+  const url = buildApiUrl(endpoint);
   const rawToken = authStorage.getToken();
   const cleanToken = (typeof rawToken === 'string' && rawToken.trim() && rawToken !== 'null' && rawToken !== 'undefined')
     ? rawToken.trim().replace(/^Bearer\s+/i, '')
@@ -210,7 +272,7 @@ export const api = {
    * Auth: Login user / operator
    */
   async login(email, password, accountType = null) {
-    const data = await request('/auth/login', {
+    const data = await request('/api/v1/auth/login', {
       method: 'POST',
       body: JSON.stringify({
         email,
@@ -225,7 +287,7 @@ export const api = {
    * Auth: Register / Signup new user (Driver or Operator)
    */
   async register({ email, password, name, accountType, organizationName, role }) {
-    const data = await request('/auth/register', {
+    const data = await request('/api/v1/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password, name, accountType, organizationName, role })
     });
@@ -243,7 +305,7 @@ export const api = {
    * Auth: Verify 6-digit signup OTP
    */
   async verifySignup({ email, otp, token }) {
-    const data = await request('/auth/verify-signup', {
+    const data = await request('/api/v1/auth/verify-signup', {
       method: 'POST',
       body: JSON.stringify({ email, otp, token })
     });
@@ -254,7 +316,7 @@ export const api = {
    * Auth: Resend 6-digit signup OTP with cooldown
    */
   async resendSignupOtp({ email, token }) {
-    const data = await request('/auth/resend-signup-otp', {
+    const data = await request('/api/v1/auth/resend-signup-otp', {
       method: 'POST',
       body: JSON.stringify({ email, token })
     });
@@ -268,7 +330,7 @@ export const api = {
     const token = authStorage.getToken();
     if (!token) return null;
     try {
-      const data = await request('/auth/me');
+      const data = await request('/api/v1/auth/me');
       return data?.user || null;
     } catch {
       return null;
@@ -280,7 +342,7 @@ export const api = {
    */
   async getFacilities(city) {
     const query = city ? `?city=${encodeURIComponent(city)}` : '';
-    const data = await request(`/lots${query}`);
+    const data = await request(`/api/v1/facilities/search${query}`);
     const rawList = data.lots || data.facilities || [];
     return rawList.map(normalizeFacility);
   },
@@ -305,7 +367,7 @@ export const api = {
       params.append('maxPrice', String(maxPrice));
     }
 
-    const data = await request(`/lots/nearby?${params.toString()}`);
+    const data = await request(`/api/v1/facilities/nearby?${params.toString()}`);
     const rawList = data.facilities || [];
     return {
       facilities: rawList.map((f) => ({
@@ -331,7 +393,7 @@ export const api = {
     if (window?.startTime && window?.endTime) {
       query = `?startTime=${encodeURIComponent(new Date(window.startTime).toISOString())}&endTime=${encodeURIComponent(new Date(window.endTime).toISOString())}`;
     }
-    const data = await request(`/lots/${id}${query}`);
+    const data = await request(`/api/v1/facilities/${id}${query}`);
     const raw = data.lot || data.facility;
     return raw ? normalizeFacility(raw) : null;
   },
@@ -367,7 +429,7 @@ export const api = {
     const token = authStorage.getToken();
     if (!token) return [];
     try {
-      const data = await request('/bookings');
+      const data = await request('/api/v1/bookings');
       return data.bookings || [];
     } catch {
       return [];
@@ -379,7 +441,7 @@ export const api = {
    */
   async createBooking(bookingPayload) {
     api.requireToken();
-    const data = await request('/bookings', {
+    const data = await request('/api/v1/bookings', {
       method: 'POST',
       body: JSON.stringify(bookingPayload)
     });
@@ -391,7 +453,7 @@ export const api = {
    */
   async cancelBooking(bookingId) {
     api.requireToken();
-    const data = await request(`/bookings/${bookingId}/cancel`, {
+    const data = await request(`/api/v1/bookings/${bookingId}/cancel`, {
       method: 'PATCH'
     });
     return data.booking;
@@ -402,7 +464,7 @@ export const api = {
    */
   async getBooking(bookingId) {
     api.requireToken();
-    const data = await request(`/bookings/${bookingId}`);
+    const data = await request(`/api/v1/bookings/${bookingId}`);
     return data.booking;
   },
 
@@ -413,7 +475,7 @@ export const api = {
     const token = authStorage.getToken();
     if (!token) return [];
     try {
-      const data = await request('/v1/vehicles');
+      const data = await request('/api/v1/vehicles');
       return data.vehicles || [];
     } catch {
       return [];
@@ -425,7 +487,7 @@ export const api = {
    */
   async createVehicle(payload) {
     api.requireToken();
-    const data = await request('/v1/vehicles', {
+    const data = await request('/api/v1/vehicles', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
@@ -437,7 +499,7 @@ export const api = {
    */
   async updateVehicle(vehicleId, payload) {
     api.requireToken();
-    const data = await request(`/v1/vehicles/${vehicleId}`, {
+    const data = await request(`/api/v1/vehicles/${vehicleId}`, {
       method: 'PATCH',
       body: JSON.stringify(payload)
     });
@@ -449,7 +511,7 @@ export const api = {
    */
   async deleteVehicle(vehicleId) {
     api.requireToken();
-    const data = await request(`/v1/vehicles/${vehicleId}`, {
+    const data = await request(`/api/v1/vehicles/${vehicleId}`, {
       method: 'DELETE'
     });
     return data;
@@ -460,7 +522,7 @@ export const api = {
    */
   async setDefaultVehicle(vehicleId) {
     api.requireToken();
-    const data = await request(`/v1/vehicles/${vehicleId}/default`, {
+    const data = await request(`/api/v1/vehicles/${vehicleId}/default`, {
       method: 'PATCH'
     });
     return data.vehicle;
@@ -471,7 +533,7 @@ export const api = {
    */
   async createPaymentOrder(bookingId) {
     api.requireToken();
-    const data = await request('/v1/payments/order', {
+    const data = await request('/api/v1/payments/order', {
       method: 'POST',
       body: JSON.stringify({ bookingId })
     });
@@ -483,7 +545,7 @@ export const api = {
    */
   async verifyPayment({ orderId, paymentId, signature }) {
     api.requireToken();
-    const data = await request('/v1/payments/verify', {
+    const data = await request('/api/v1/payments/verify', {
       method: 'POST',
       body: JSON.stringify({ orderId, paymentId, signature })
     });
@@ -503,7 +565,7 @@ export const api = {
   async ingestEvent(facilityId, payload) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/v1/facilities/${facilityId}/events`, {
+    const data = await request(`/api/v1/facilities/${facilityId}/events`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify(payload)
@@ -517,7 +579,7 @@ export const api = {
   async getOccupancy(facilityId) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/v1/facilities/${facilityId}/occupancy`, {
+    const data = await request(`/api/v1/facilities/${facilityId}/occupancy`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data;
@@ -529,7 +591,7 @@ export const api = {
   async updateSpotStatus(facilityId, spotId, status) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/v1/facilities/${facilityId}/spots/${spotId}/status`, {
+    const data = await request(`/api/v1/facilities/${facilityId}/spots/${spotId}/status`, {
       method: 'PATCH',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify({ status })
@@ -538,15 +600,13 @@ export const api = {
   },
 
   /**
-   * Operator: Create parking spot in facility
-  /**
    * Operator: Get bookings for facility
    */
   async getFacilityBookings(facilityId, params = {}) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/facilities/${facilityId}/bookings${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/facilities/${facilityId}/bookings${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data.bookings || [];
@@ -558,7 +618,7 @@ export const api = {
   async createSpot(facilityId, spotData) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/v1/facilities/${facilityId}/spots`, {
+    const data = await request(`/api/v1/facilities/${facilityId}/spots`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify(spotData)
@@ -573,7 +633,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/facilities/${facilityId}/spots${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/facilities/${facilityId}/spots${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data.slots || data.spots || [];
@@ -587,7 +647,7 @@ export const api = {
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
     try {
-      const data = await request(`/v1/admin/audit-logs${query ? `?${query}` : ''}`, {
+      const data = await request(`/api/v1/admin/audit-logs${query ? `?${query}` : ''}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       return data.auditLogs || [];
@@ -603,7 +663,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = facilityId ? `?facilityId=${encodeURIComponent(facilityId)}` : '';
-    const data = await request(`/v1/optimization/recommendations${query}`, {
+    const data = await request(`/api/v1/optimization/recommendations${query}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data.recommendations || [];
@@ -615,7 +675,7 @@ export const api = {
   async acceptRecommendation(id) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/v1/optimization/recommendations/${id}/accept`, {
+    const data = await request(`/api/v1/optimization/recommendations/${id}/accept`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
@@ -628,7 +688,7 @@ export const api = {
   async rejectRecommendation(id, reason = 'Operator manual decline') {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/v1/optimization/recommendations/${id}/reject`, {
+    const data = await request(`/api/v1/optimization/recommendations/${id}/reject`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify({ reason })
@@ -642,7 +702,7 @@ export const api = {
   async simulatePricing(payload) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request('/v1/optimization/simulate-pricing', {
+    const data = await request('/api/v1/optimization/simulate-pricing', {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify(payload)
@@ -656,7 +716,7 @@ export const api = {
   async getDemandForecast(facilityId, horizon = 24, granularity = 'hour') {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/v1/forecasting/demand?facilityId=${facilityId}&horizon=${horizon}&granularity=${granularity}`, {
+    const data = await request(`/api/v1/forecasting/demand?facilityId=${facilityId}&horizon=${horizon}&granularity=${granularity}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data;
@@ -672,7 +732,7 @@ export const api = {
     if (facilityId) params.append('facilityId', facilityId);
     if (status) params.append('status', status);
     const query = params.toString();
-    const data = await request(`/v1/optimization/overstays${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/optimization/overstays${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data.overstays || [];
@@ -684,7 +744,7 @@ export const api = {
   async getAIInsights({ facilityId, question, startDate, endDate }) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request('/v1/ai/insights', {
+    const data = await request('/api/v1/ai/insights', {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify({ facilityId, question, startDate, endDate })
@@ -698,7 +758,7 @@ export const api = {
   async explainRecommendation(id) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request(`/v1/ai/explain-recommendation/${id}`, {
+    const data = await request(`/api/v1/ai/explain-recommendation/${id}`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
@@ -711,11 +771,11 @@ export const api = {
   async chatCopilot({ messages, facilityId = null }) {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    console.log('[API.chatCopilot] Initiating POST /v1/ai/copilot/chat', {
+    console.log('[API.chatCopilot] Initiating POST /api/v1/ai/copilot/chat', {
       turns: messages?.length,
       facilityId
     });
-    const data = await request('/v1/ai/copilot/chat', {
+    const data = await request('/api/v1/ai/copilot/chat', {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: JSON.stringify({ messages, facilityId })
@@ -731,7 +791,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/analytics/summary${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/analytics/summary${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data;
@@ -744,7 +804,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/analytics/utilization${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/analytics/utilization${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data;
@@ -757,7 +817,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/analytics/occupancy${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/analytics/occupancy${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data;
@@ -770,7 +830,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/analytics/peak-hours${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/analytics/peak-hours${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data;
@@ -784,7 +844,7 @@ export const api = {
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
     try {
-      const data = await request(`/v1/analytics/revenue${query ? `?${query}` : ''}`, {
+      const data = await request(`/api/v1/analytics/revenue${query ? `?${query}` : ''}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       return data;
@@ -803,7 +863,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/analytics/facilities${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/analytics/facilities${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data;
@@ -816,7 +876,7 @@ export const api = {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
     const query = new URLSearchParams(params).toString();
-    const data = await request(`/v1/analytics/spots${query ? `?${query}` : ''}`, {
+    const data = await request(`/api/v1/analytics/spots${query ? `?${query}` : ''}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data;
@@ -828,23 +888,9 @@ export const api = {
   async getAdminOverview() {
     await api.ensureOperatorAuth();
     const token = authStorage.getOperatorToken();
-    const data = await request('/v1/admin/overview', {
+    const data = await request('/api/v1/admin/overview', {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     return data?.overview || null;
-  },
-
-  /**
-   * Operator: Copilot AI Chat with real Gemini LLM
-   */
-  async chatCopilot({ messages, facilityId = null }) {
-    await api.ensureOperatorAuth();
-    console.log('[ParkSpot API] Sending chat message to /v1/ai/copilot/chat', { messageCount: messages?.length, facilityId });
-    const data = await request('/v1/ai/copilot/chat', {
-      method: 'POST',
-      body: JSON.stringify({ messages, facilityId })
-    });
-    console.log('[ParkSpot API] Copilot response:', data);
-    return data;
   }
 };
