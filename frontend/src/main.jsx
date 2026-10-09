@@ -8,6 +8,7 @@ import { FullScreenLoader } from './components/shared/Loading';
 import { Footer } from './components/shared/Footer/Footer';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
+import { OperatorOnboardingPage } from './pages/OperatorOnboardingPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import {
   INITIAL_FACILITIES,
@@ -16,14 +17,14 @@ import {
   generateFloorSpots
 } from './data/mockData';
 import { api, normalizeFacility } from './services/api';
-import { ShieldAlert } from 'lucide-react';
+import { ShieldAlert, Building2, CheckCircle2, ArrowRight } from 'lucide-react';
 import './styles.css';
 import './components/landing/landing.css';
 
 function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const { user, isAuthenticated, isLoading, logout, updateUser, refreshProfile } = useAuth();
 
   const [driverView, setDriverView] = useState('home'); // home | search | facility | date-time | review | payment | confirmed | bookings
   const [operatorTab, setOperatorTab] = useState('dashboard');
@@ -137,7 +138,7 @@ function AppContent() {
         }
       } else if (user.accountType === 'OPERATOR') {
         try {
-          const facId = user.facilityId || user.facility?.id || (facilities[0]?.id);
+          const facId = user.facilityId || user.facility?.id || user.facility?._id;
           if (facId && isLiveConnected) {
             const facBookings = await api.getFacilityBookings(facId);
             if (isMounted && Array.isArray(facBookings)) {
@@ -516,8 +517,80 @@ function AppContent() {
     // Everything in the Operator Console must be scoped to their assigned facility.
     const operatorFacility =
       (user.facility ? normalizeFacility(user.facility) : null) ||
-      facilities.find((f) => f.id === user.facilityId || f._id === user.facilityId) ||
-      facilities[0];
+      facilities.find((f) => f.id === user.facilityId || f._id === user.facilityId);
+
+    // If operator has not completed facility onboarding yet, render setup checklist
+    if (!operatorFacility) {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--ps-background-primary)' }}>
+          <header className="app-header" style={{ padding: '0.75rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Logo variant="full" size="nav" theme="dark" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--ps-primary-light)' }}>{user.name}</div>
+                <div style={{ fontSize: '0.6875rem', color: 'rgba(244, 242, 231, 0.65)' }}>Operator Account</div>
+              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  logout();
+                  navigate('/login');
+                }}
+              >
+                Sign Out
+              </button>
+            </div>
+          </header>
+
+          <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+            <div className="card" style={{ maxWidth: '580px', width: '100%', padding: '2.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                <div style={{ width: 44, height: 44, borderRadius: '10px', backgroundColor: 'rgba(178, 162, 64, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ps-accent-dark)' }}>
+                  <Building2 size={24} />
+                </div>
+                <div>
+                  <h2 style={{ fontSize: '1.35rem', fontWeight: 800, margin: 0, color: 'var(--ps-primary-dark)' }}>
+                    Complete Facility Registration
+                  </h2>
+                  <p className="metadata" style={{ margin: 0 }}>
+                    Register your parking facility to unlock live operations and telemetry
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: 'var(--ps-primary-light)', borderRadius: 'var(--ps-radius-md)', padding: '1.25rem', marginBottom: '1.75rem' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ps-secondary-dark)', marginBottom: '0.75rem' }}>
+                  Setup Checklist
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', border: '2px solid var(--ps-accent-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: 'var(--ps-accent-dark)' }}>1</div>
+                    <span style={{ fontSize: '0.875rem', color: 'var(--ps-primary-dark)' }}>Facility location, address & verified map pin</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', border: '2px solid var(--ps-accent-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: 'var(--ps-accent-dark)' }}>2</div>
+                    <span style={{ fontSize: '0.875rem', color: 'var(--ps-primary-dark)' }}>Floors, spot counts & unique parking bay identifiers</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', border: '2px solid var(--ps-accent-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: 'var(--ps-accent-dark)' }}>3</div>
+                    <span style={{ fontSize: '0.875rem', color: 'var(--ps-primary-dark)' }}>Live parking operations, driver discovery & telemetry</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="btn btn-primary btn-block"
+                style={{ padding: '0.85rem', fontSize: '0.95rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                onClick={() => navigate('/operator/onboarding')}
+              >
+                <span>Complete Facility Setup</span>
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          </main>
+        </div>
+      );
+    }
 
     const operatorFacilities = operatorFacility ? [operatorFacility] : [];
 
@@ -540,6 +613,43 @@ function AppContent() {
           }}
         />
       </div>
+    );
+  };
+
+  // =========================================================================
+  // OPERATOR ONBOARDING VIEW
+  // =========================================================================
+  const renderOperatorOnboardingView = () => {
+    // ROUTE GUARD: Unauthenticated users go to login
+    if (!user) {
+      return <Navigate to="/login" replace />;
+    }
+
+    // ROUTE GUARD: Drivers must never access operator onboarding
+    if (user.accountType === 'DRIVER') {
+      return <Navigate to="/driver" replace />;
+    }
+
+    // ROUTE GUARD: If operator already has a facility, open dashboard
+    if (user.facilityId || user.facility) {
+      return <Navigate to="/operator" replace />;
+    }
+
+    return (
+      <OperatorOnboardingPage
+        onOnboarded={(result) => {
+          if (result?.facility) {
+            const normalized = normalizeFacility(result.facility);
+            setFacilities((prev) => [normalized, ...prev.filter((f) => f.id !== normalized.id)]);
+          }
+          if (result?.user) {
+            updateUser(result.user);
+          } else {
+            refreshProfile();
+          }
+          navigate('/operator');
+        }}
+      />
     );
   };
 
@@ -572,6 +682,10 @@ function AppContent() {
       <Route
         path="/operator"
         element={renderOperatorView()}
+      />
+      <Route
+        path="/operator/onboarding"
+        element={renderOperatorOnboardingView()}
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

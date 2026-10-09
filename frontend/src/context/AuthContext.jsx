@@ -52,6 +52,10 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password, accountType = null) => {
     const res = await api.login(email, password, accountType);
+    // If backend requires 2FA challenge, return challenge payload
+    if (res?.requiresMfa || res?.status === 'MFA_REQUIRED') {
+      return res;
+    }
     if (res?.token && res?.user) {
       authStorage.setToken(res.token);
       authStorage.setUser(res.user);
@@ -69,8 +73,8 @@ export function AuthProvider({ children }) {
       accountType,
       organizationName
     });
-    // If backend requires OTP verification, return pending verification payload
-    if (res?.status === 'PENDING_VERIFICATION' || res?.requiresVerification) {
+    // If backend requires TOTP setup, return pending challenge payload
+    if (res?.status === 'PENDING_VERIFICATION' || res?.requiresVerification || res?.requiresMfaSetup) {
       return res;
     }
     // Fallback if auto-verified
@@ -83,8 +87,8 @@ export function AuthProvider({ children }) {
     throw new Error('Invalid registration response.');
   }, []);
 
-  const verifySignup = useCallback(async ({ email, otp, token }) => {
-    const res = await api.verifySignup({ email, otp, token });
+  const verifyMfaSetup = useCallback(async ({ email, code, setupToken }) => {
+    const res = await api.verifyMfaSetup({ email, code, setupToken });
     if (res?.token && res?.user) {
       authStorage.setToken(res.token);
       authStorage.setUser(res.user);
@@ -94,13 +98,67 @@ export function AuthProvider({ children }) {
     throw new Error(res?.message || 'Verification could not be completed.');
   }, []);
 
-  const resendSignupOtp = useCallback(async ({ email, token }) => {
-    return api.resendSignupOtp({ email, token });
+  const verifyMfaLogin = useCallback(async ({ email, code, mfaToken }) => {
+    const res = await api.verifyMfaLogin({ email, code, mfaToken });
+    if (res?.token && res?.user) {
+      authStorage.setToken(res.token);
+      authStorage.setUser(res.user);
+      setUser(res.user);
+      return res.user;
+    }
+    throw new Error(res?.message || 'Verification code could not be verified.');
+  }, []);
+
+  const verifyMfaRecovery = useCallback(async ({ email, recoveryCode, mfaToken }) => {
+    const res = await api.verifyMfaRecovery({ email, recoveryCode, mfaToken });
+    if (res?.token && res?.user) {
+      authStorage.setToken(res.token);
+      authStorage.setUser(res.user);
+      setUser(res.user);
+      return res.user;
+    }
+    throw new Error(res?.message || 'Recovery code could not be verified.');
+  }, []);
+
+  const verifySignup = useCallback(async ({ email, otp, code, token, setupToken }) => {
+    const res = await api.verifySignup({ email, otp, code, token, setupToken });
+    if (res?.token && res?.user) {
+      authStorage.setToken(res.token);
+      authStorage.setUser(res.user);
+      setUser(res.user);
+      return res.user;
+    }
+    throw new Error(res?.message || 'Verification could not be completed.');
+  }, []);
+
+  const resendSignupOtp = useCallback(async ({ email, token, setupToken }) => {
+    return api.resendSignupOtp({ email, token, setupToken });
   }, []);
 
   const logout = useCallback(() => {
     authStorage.clearToken();
     setUser(null);
+  }, []);
+
+  const updateUser = useCallback((updatedUser) => {
+    if (updatedUser) {
+      authStorage.setUser(updatedUser);
+      setUser(updatedUser);
+    }
+  }, []);
+
+  const refreshProfile = useCallback(async () => {
+    try {
+      const liveUser = await api.getMe();
+      if (liveUser) {
+        authStorage.setUser(liveUser);
+        setUser(liveUser);
+        return liveUser;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
   }, []);
 
   const value = {
@@ -109,10 +167,16 @@ export function AuthProvider({ children }) {
     isLoading,
     login,
     signup,
+    verifyMfaSetup,
+    verifyMfaLogin,
+    verifyMfaRecovery,
     verifySignup,
     resendSignupOtp,
-    logout
+    logout,
+    updateUser,
+    refreshProfile
   };
+
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

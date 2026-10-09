@@ -183,10 +183,28 @@ async function createTenantFacility(organizationId, data, userId = null, ipAddre
   if (!organizationId) {
     throw new AppError(403, 'TENANT_REQUIRED', 'An active organization context is required.');
   }
+
+  // Enforce ONE OPERATOR = ONE PARKING FACILITY
+  const existing = await ParkingLot.findOne({
+    $or: [
+      ...(userId ? [{ operatorId: userId }] : []),
+      { organizationId }
+    ]
+  });
+  if (existing) {
+    throw new AppError(409, 'FACILITY_ALREADY_EXISTS', 'An operator account can only register one parking facility.');
+  }
+
   const facility = await ParkingLot.create({
     ...data,
-    organizationId
+    organizationId,
+    operatorId: userId
   });
+
+  if (userId) {
+    const { User } = require('../models');
+    await User.findByIdAndUpdate(userId, { facilityId: facility._id });
+  }
 
   await logAction({
     organizationId,
@@ -199,6 +217,198 @@ async function createTenantFacility(organizationId, data, userId = null, ipAddre
   });
 
   return { ...facility.toObject(), id: String(facility._id) };
+}
+
+async function onboardFacility({
+  organizationId,
+  userId,
+  facilityData,
+  floorsData,
+  ipAddress = null
+}) {
+  if (!organizationId) {
+    throw new AppError(403, 'TENANT_REQUIRED', 'An active organization context is required.');
+  }
+
+  const { User, Floor, ParkingSlot } = require('../models');
+
+  // Enforce ONE OPERATOR = ONE PARKING FACILITY
+  const existing = await ParkingLot.findOne({
+    $or: [
+      ...(userId ? [{ operatorId: userId }] : []),
+      { organizationId }
+    ]
+  });
+  if (existing) {
+    throw new AppError(409, 'FACILITY_ALREADY_EXISTS', 'An operator account can only register one parking facility.');
+  }
+
+  if (userId) {
+    const userDoc = await User.findById(userId);
+    if (userDoc?.facilityId) {
+      throw new AppError(409, 'FACILITY_ALREADY_EXISTS', 'An operator account can only register one parking facility.');
+    }
+  }
+
+  // Validate floor and spot uniqueness
+  const floorNames = new Set();
+  const floorNumbers = new Set();
+  const allSpotNumbers = new Set();
+
+  for (const floor of floorsData) {
+    const fNameLower = floor.name.trim().toLowerCase();
+    if (floorNames.has(fNameLower)) {
+      throw new AppError(400, 'DUPLICATE_FLOOR', `Duplicate floor name "${floor.name}". Floor names must be unique within the facility.`);
+    }
+    floorNames.add(fNameLower);
+
+    const fNum = Number(floor.floorNumber);
+    if (floorNumbers.has(fNum)) {
+      throw new AppError(400, 'DUPLICATE_FLOOR', `Duplicate floor number "${floor.floorNumber}". Floor numbers must be unique within the facility.`);
+    }
+    floorNumbers.add(fNum);
+
+    if (!Array.isArray(floor.spots) || floor.spots.length === 0) {
+      throw new AppError(400, 'INVALID_FLOOR_SPOTS', `Floor "${floor.name}" must contain at least 1 parking spot.`);
+    }
+
+    for (const spot of floor.spots) {
+      const sNum = String(spot.number).trim().toUpperCase();
+      if (!sNum) {
+        throw new AppError(400, 'INVALID_SPOT_NUMBER', 'Spot identifier cannot be empty.');
+      }
+      if (allSpotNumbers.has(sNum)) {
+        throw new AppError(400, 'DUPLICATE_SPOT_IDENTIFIER', `Duplicate spot identifier "${sNum}". Spot identifiers must be unique across the facility.`);
+      }
+      allSpotNumbers.add(sNum);
+    }
+  }
+
+  // Use MongoDB transaction if supported; otherwise safe rollback cleanup
+  let session = null;
+  let useTransaction = false;
+  try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+    useTransaction = true;
+  } catch (_err) {
+    session = null;
+    useTransaction = false;
+  }
+
+  let createdFacility = null;
+  try {
+    const opts = useTransaction ? { session } : {};
+    const facilityPayload = {
+      ...facilityData,
+      organizationId,
+      operatorId: userId,
+      active: true
+    };
+    if (facilityData.latitude !== undefined && facilityData.longitude !== undefined) {
+      facilityPayload.latitude = Number(facilityData.latitude);
+      facilityPayload.longitude = Number(facilityData.longitude);
+      facilityPayload.location = {
+        type: 'Point',
+        coordinates: [Number(facilityData.longitude), Number(facilityData.latitude)]
+      };
+    }
+
+    const [facility] = await ParkingLot.create([facilityPayload], opts);
+    createdFacility = facility;
+
+    for (const fl of floorsData) {
+      const [floorDoc] = await Floor.create([{
+        facilityId: facility._id,
+        organizationId,
+        name: fl.name.trim(),
+        floorNumber: Number(fl.floorNumber),
+        capacity: fl.spots.length,
+        status: 'ACTIVE'
+      }], opts);
+
+      const spotDocs = fl.spots.map((spot, idx) => ({
+        lotId: facility._id,
+        floorId: floorDoc._id,
+        organizationId,
+        number: String(spot.number).trim().toUpperCase(),
+        level: floorDoc.name,
+        type: ['STANDARD', 'COMPACT', 'EV', 'ACCESSIBLE'].includes(String(spot.type || '').toUpperCase())
+          ? String(spot.type).toUpperCase()
+          : 'STANDARD',
+        status: 'AVAILABLE',
+        isActive: true,
+        coordinates: spot.coordinates || {
+          x: (idx % 8) * 3,
+          y: Math.floor(idx / 8) * 6,
+          width: 2.5,
+          height: 5.0,
+          rotation: 0
+        }
+      }));
+
+      await ParkingSlot.insertMany(spotDocs, opts);
+    }
+
+    if (userId) {
+      await User.findByIdAndUpdate(userId, { facilityId: facility._id }, opts);
+    }
+
+    if (useTransaction) {
+      await session.commitTransaction();
+    }
+
+    await logAction({
+      organizationId,
+      userId,
+      action: 'FACILITY_CREATED',
+      entityType: 'ParkingLot',
+      entityId: facility._id,
+      newValue: {
+        name: facility.name,
+        address: facility.address,
+        city: facility.city,
+        totalSpots: allSpotNumbers.size,
+        floorsCount: floorsData.length
+      },
+      ipAddress
+    });
+
+    const fullFacility = await getTenantFacilityById(facility._id, organizationId);
+    let updatedUser = null;
+    let token = null;
+    if (userId) {
+      const uDoc = await User.findById(userId);
+      const authService = require('./auth.service');
+      token = authService.tokenFor(uDoc);
+      const userPayload = authService.publicUser(uDoc);
+      userPayload.facility = fullFacility;
+      updatedUser = userPayload;
+    }
+
+    return {
+      facility: fullFacility,
+      user: updatedUser,
+      token
+    };
+  } catch (error) {
+    if (useTransaction && session) {
+      await session.abortTransaction().catch(() => {});
+    } else if (createdFacility) {
+      // Safe cleanup rollback for standalone instances
+      await ParkingSlot.deleteMany({ lotId: createdFacility._id }).catch(() => {});
+      await Floor.deleteMany({ facilityId: createdFacility._id }).catch(() => {});
+      await ParkingLot.deleteOne({ _id: createdFacility._id }).catch(() => {});
+      if (userId) {
+        await User.findByIdAndUpdate(userId, { facilityId: null }).catch(() => {});
+      }
+    }
+    throw error;
+  } finally {
+    if (session) {
+      session.endSession().catch(() => {});
+    }
+  }
 }
 
 async function updateTenantFacility(id, organizationId, data, userId = null, ipAddress = null) {
@@ -234,5 +444,6 @@ module.exports = {
   listTenantFacilities,
   getTenantFacilityById,
   createTenantFacility,
+  onboardFacility,
   updateTenantFacility
 };

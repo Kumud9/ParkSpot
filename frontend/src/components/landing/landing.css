@@ -144,7 +144,7 @@
 }
 
 /* =========================================================================
-   1. INTEGRATED PILL NAVIGATION BAR
+   1. EDITORIAL NAVBAR OVER HERO
    ========================================================================= */
 .landing-nav-wrapper {
   width: 100%;
@@ -152,24 +152,31 @@
   justify-content: center;
   position: relative;
   z-index: 50;
-  transition: var(--lp-transition);
+  transition: background-color 0.3s ease, backdrop-filter 0.3s ease, box-shadow 0.3s ease;
+}
+
+.landing-nav-wrapper.scrolled {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background-color: rgba(24, 22, 17, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .landing-nav-container {
   width: 100%;
-  max-width: 1360px;
-  background-color: rgba(244, 242, 231, 0.94);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(112, 115, 113, 0.22);
-  border-radius: 9999px;
-  padding: 0.44rem 1.25rem 0.44rem 0.95rem;
+  max-width: 1440px;
+  background: transparent;
+  padding: 0.95rem 3.5rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 4px 18px rgba(37, 34, 27, 0.08);
-  transition: var(--lp-transition);
-  gap: 1.5rem;
+  gap: 1.75rem;
+  box-sizing: border-box;
 }
 
 .landing-nav-brand {
@@ -184,11 +191,11 @@
 }
 
 .landing-nav-brand:hover {
-  opacity: 0.94;
+  opacity: 0.95;
 }
 
 .landing-brand-logo-img {
-  height: 40px;
+  height: 32px;
   width: auto;
   max-width: none;
   object-fit: contain;
@@ -197,74 +204,50 @@
 
 .landing-brand-wordmark {
   font-family: var(--lp-font-display, 'Outfit', 'Inter', -apple-system, sans-serif);
-  font-size: 1.85rem;
+  font-size: 1.45rem;
   font-weight: 800;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.025em;
   line-height: 1;
+  color: #FFFFFF;
   display: inline-flex;
   align-items: center;
-}
-
-.landing-wordmark-park {
-  color: #F5A623; /* Exact yellow from ParkSpot logo pin */
-}
-
-.landing-wordmark-spot {
-  color: #000000; /* Black as specified */
-}
-
-@media (max-width: 900px) {
-  .landing-brand-logo-img {
-    height: 36px;
-  }
-  .landing-brand-wordmark {
-    font-size: 1.6rem;
-  }
-}
-
-@media (max-width: 600px) {
-  .landing-brand-logo-img {
-    height: 32px;
-  }
-  .landing-brand-wordmark {
-    font-size: 1.35rem;
-  }
 }
 
 .landing-nav-center {
   display: flex;
   align-items: center;
-  gap: 1.85rem;
+  gap: 2rem;
   justify-content: center;
 }
 
 .landing-nav-item {
   background: none;
   border: none;
-  color: var(--lp-dark);
-  font-size: 0.925rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: var(--ps-font-sans, 'Inter', sans-serif);
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
-  padding: 0.3rem 0.45rem;
+  padding: 0.25rem 0;
   position: relative;
-  transition: var(--lp-transition);
+  transition: color 0.2s ease;
 }
 
 .landing-nav-item:hover {
-  color: #000000;
+  color: #FFFFFF;
 }
 
 .landing-nav-item::after {
   content: '';
   position: absolute;
-  bottom: 0;
-  left: 0.5rem;
-  right: 0.5rem;
+  bottom: -2px;
+  left: 0;
+  right: 0;
   height: 2px;
-  background-color: var(--lp-accent-dark);
+  background-color: var(--lp-accent, #F3F456);
   opacity: 0;
-  transform: scaleX(0.7);
-  transition: var(--lp-transition);
+  transform: scaleX(0.5);
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .landing-nav-item:hover::after {
@@ -275,53 +258,58 @@
 .landing-nav-actions {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
+  gap: 1rem;
   flex-shrink: 0;
 }
 
 .landing-nav-signin {
   background: none;
   border: none;
-  color: var(--lp-dark);
-  font-size: 0.925rem;
+  color: rgba(255, 255, 255, 0.95);
+  font-family: var(--ps-font-sans, 'Inter', sans-serif);
+  font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  padding: 0.35rem 0.75rem;
-  transition: var(--lp-transition);
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  transition: color 0.2s ease, background-color 0.2s ease;
 }
 
 .landing-nav-signin:hover {
-  color: #000000;
+  color: #FFFFFF;
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .landing-nav-getstarted {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  background-color: var(--lp-dark);
-  color: var(--lp-bg);
+  gap: 0.4rem;
+  background-color: var(--lp-accent, #F3F456);
+  color: #201E17;
   border: none;
   border-radius: 9999px;
-  padding: 0.48rem 1.15rem;
+  padding: 0.46rem 1.15rem;
+  font-family: var(--ps-font-sans, 'Inter', sans-serif);
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: var(--lp-transition);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 14px rgba(243, 244, 86, 0.25);
 }
 
 .landing-nav-getstarted:hover {
-  background-color: #000000;
+  background-color: #E8E940;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(37, 34, 27, 0.15);
+  box-shadow: 0 6px 18px rgba(243, 244, 86, 0.4);
 }
 
 .landing-mobile-menu-btn {
   display: none;
   background: none;
   border: none;
-  color: var(--lp-dark);
+  color: #FFFFFF;
   cursor: pointer;
-  padding: 0.25rem;
+  padding: 0.35rem;
 }
 
 .landing-mobile-menu {
@@ -329,109 +317,137 @@
 }
 
 /* =========================================================================
-   2. LARGE EDITORIAL HERO SECTION (PHOTOGRAPHY-LED PANEL)
+   2. IMMERSIVE FULL-VIEWPORT EDITORIAL HERO SECTION
    ========================================================================= */
 .editorial-hero {
-  padding: 1.25rem 1.75rem 3.5rem;
-  width: 100%;
-  position: relative;
-}
-
-.editorial-hero-container {
-  width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
-}
-
-.editorial-hero-panel {
   position: relative;
   width: 100%;
-  min-height: 700px;
-  border-radius: 30px;
-  overflow: hidden;
-  border: 1px solid rgba(37, 34, 27, 0.12);
-  box-shadow: 0 20px 48px rgba(37, 34, 27, 0.08);
+  min-height: 94vh;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background-color: #25221B;
+  overflow: hidden;
+  background-color: #1F1D17;
+  margin: 0;
+  padding: 0;
 }
 
-/* Hero Photography Background */
+/* Hero Photography Background: Full-bleed cover with intentional focal point */
 .editorial-hero-bg-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center;
+  object-position: 60% center;
   z-index: 1;
   display: block;
 }
 
-/* Subtle Dark/Neutral Gradient Overlay (Vignette behind text only - softened) */
+/* Subtle Dark Left-Side Gradient Overlay (Soft feathering over sunny image) */
 .editorial-hero-overlay {
   position: absolute;
   inset: 0;
   z-index: 2;
   pointer-events: none;
-  background: linear-gradient(135deg, rgba(28, 25, 20, 0.72) 0%, rgba(28, 25, 20, 0.40) 48%, rgba(28, 25, 20, 0.05) 82%, transparent 100%),
-              linear-gradient(to top, rgba(28, 25, 20, 0.56) 0%, transparent 42%);
+  background: 
+    linear-gradient(90deg, 
+      rgba(20, 18, 14, 0.94) 0%, 
+      rgba(20, 18, 14, 0.88) 28%, 
+      rgba(20, 18, 14, 0.65) 45%, 
+      rgba(20, 18, 14, 0.25) 65%, 
+      rgba(20, 18, 14, 0.05) 80%, 
+      transparent 92%
+    ),
+    linear-gradient(180deg, 
+      rgba(20, 18, 14, 0.55) 0%, 
+      rgba(20, 18, 14, 0.18) 16%, 
+      transparent 32%
+    );
 }
 
-/* Integrated Navigation Pill Slot inside Hero */
+/* Navbar slot inside top of Hero */
 .editorial-hero-nav-slot {
   position: relative;
   z-index: 20;
   width: 100%;
-  padding: 1.5rem 1.75rem 0;
 }
 
-/* Dedicated Mobile Hero Image (Hidden on Desktop) */
-.editorial-hero-mobile-image-wrap {
-  display: none;
+/* Hero Content Area */
+.editorial-hero-content-wrap {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 2.5rem 3.5rem 5.5rem;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  box-sizing: border-box;
 }
 
-/* Editorial Hero Copy ON TOP OF / WITHIN the Hero Image */
 .editorial-hero-content {
   position: relative;
   z-index: 10;
-  padding: 3.5rem 3.5rem 4rem;
-  max-width: 680px;
-  margin-top: auto;
-  color: #F4F2E7;
+  max-width: 580px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/* Eyebrow: PREMIUM MANAGED PARKING ─── */
+.editorial-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1.5rem;
 }
 
 .editorial-hero-tag {
   display: inline-block;
-  font-size: 0.78rem;
+  font-family: var(--lp-font-display, 'Outfit', 'Inter', sans-serif);
+  font-size: 0.8125rem;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--lp-accent, #F3F456);
-  margin-bottom: 1rem;
 }
 
+.editorial-hero-eyebrow-line {
+  display: inline-block;
+  width: 36px;
+  height: 1.5px;
+  background-color: var(--lp-accent, #F3F456);
+  opacity: 0.85;
+}
+
+/* Headline: Parking, without the search. */
 .editorial-hero-headline {
-  font-size: clamp(2.85rem, 5vw, 4.35rem);
+  font-family: var(--lp-font-display, 'Outfit', 'Inter', sans-serif);
+  font-size: clamp(3.25rem, 5.8vw, 5.75rem);
   font-weight: 800;
-  line-height: 1.06;
+  line-height: 1.04;
   letter-spacing: -0.035em;
-  color: #F4F2E7;
-  margin-bottom: 1.15rem;
-  max-width: 580px;
+  color: #FFFFFF;
+  margin: 0 0 1.6rem 0;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.25);
 }
 
-.hero-heading-break {
-  display: block;
+.hero-headline-accent {
+  color: var(--lp-accent, #F3F456);
 }
 
+/* Supporting Text */
 .editorial-hero-subhead {
-  font-size: clamp(1.05rem, 1.35vw, 1.2rem);
-  color: rgba(244, 242, 231, 0.92);
-  line-height: 1.52;
+  font-family: var(--ps-font-sans, 'Inter', sans-serif);
+  font-size: clamp(1.05rem, 1.25vw, 1.2rem);
+  color: rgba(255, 255, 255, 0.88);
+  line-height: 1.55;
   max-width: 480px;
-  margin-bottom: 2rem;
+  margin: 0 0 2.25rem 0;
   font-weight: 400;
 }
 
@@ -439,10 +455,11 @@
   display: inline;
 }
 
+/* CTA Buttons */
 .editorial-hero-buttons {
   display: flex;
   align-items: center;
-  gap: 0.95rem;
+  gap: 1rem;
   flex-wrap: wrap;
 }
 
@@ -450,23 +467,25 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.55rem;
   background-color: var(--lp-accent, #F3F456);
-  color: var(--lp-dark, #25221B);
+  color: #201E17;
   border: none;
   border-radius: 9999px;
-  padding: 0.8rem 1.75rem;
-  font-size: 0.95rem;
+  padding: 0.875rem 2rem;
+  font-family: var(--ps-font-sans, 'Inter', sans-serif);
+  font-size: 0.975rem;
   font-weight: 700;
   cursor: pointer;
-  transition: var(--lp-transition);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   text-decoration: none;
+  box-shadow: 0 4px 18px rgba(243, 244, 86, 0.28);
 }
 
 .editorial-btn-find-parking:hover {
   background-color: #E8E940;
   transform: translateY(-2px);
-  box-shadow: 0 6px 18px rgba(243, 244, 86, 0.32);
+  box-shadow: 0 8px 24px rgba(243, 244, 86, 0.42);
 }
 
 .editorial-btn-for-businesses {
@@ -474,24 +493,25 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background-color: rgba(40, 38, 33, 0.58);
+  background-color: rgba(30, 27, 22, 0.38);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  color: #F4F2E7;
-  border: 1px solid rgba(244, 242, 231, 0.3);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 9999px;
-  padding: 0.8rem 1.75rem;
-  font-size: 0.95rem;
+  padding: 0.875rem 2rem;
+  font-family: var(--ps-font-sans, 'Inter', sans-serif);
+  font-size: 0.975rem;
   font-weight: 600;
   cursor: pointer;
-  transition: var(--lp-transition);
+  transition: all 0.2s ease;
   text-decoration: none;
 }
 
 .editorial-btn-for-businesses:hover {
-  background-color: rgba(40, 38, 33, 0.78);
+  background-color: rgba(45, 41, 33, 0.65);
   color: #FFFFFF;
-  border-color: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.7);
   transform: translateY(-2px);
 }
 
@@ -2724,18 +2744,17 @@
    ========================================================================= */
 
 @media (max-width: 1024px) {
+  .landing-nav-container {
+    padding: 0.85rem 2rem;
+  }
   .editorial-hero {
-    padding: 1.25rem 1.25rem 3rem;
+    min-height: 88vh;
   }
-  .editorial-hero-panel {
-    min-height: 620px;
-    border-radius: 24px;
-  }
-  .editorial-hero-content {
-    padding: 3rem 2.5rem 3.5rem;
+  .editorial-hero-content-wrap {
+    padding: 2rem 2.25rem 4.5rem;
   }
   .editorial-hero-headline {
-    font-size: 3.25rem;
+    font-size: clamp(3rem, 5.5vw, 4.25rem);
   }
   .find-parking-grid {
     grid-template-columns: 1fr;
@@ -2783,24 +2802,27 @@
   }
   .landing-mobile-menu-btn {
     display: block;
+    color: #FFFFFF;
   }
   .landing-mobile-menu {
     display: flex;
     flex-direction: column;
     gap: 1rem;
     padding: 1.5rem;
-    background-color: #FFFFFF;
+    background-color: rgba(24, 22, 17, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-radius: var(--lp-radius-md);
-    margin-top: 0.5rem;
-    box-shadow: var(--lp-shadow-floating);
-    border: 1px solid var(--lp-surface-light);
+    margin: 0.5rem 1rem 0;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.12);
   }
   .landing-mobile-link {
     background: none;
     border: none;
-    font-size: 1rem;
+    font-size: 1.05rem;
     font-weight: 600;
-    color: var(--lp-dark);
+    color: #FFFFFF;
     text-align: left;
     cursor: pointer;
   }
@@ -2811,80 +2833,64 @@
     margin-top: 0.5rem;
   }
 
-  /* SECTION 12: MOBILE HERO COMPOSITION */
-  /* [ Logo + Menu ] -> [ Large hero image ] -> PREMIUM MANAGED PARKING -> Parking, without the search. -> description -> [ Find Parking ] -> [ For Businesses ] */
+  /* IMMERSIVE MOBILE HERO */
   .editorial-hero {
-    padding: 1rem 1rem 2.5rem;
-  }
-  .editorial-hero-container {
+    min-height: 86vh;
     padding: 0;
   }
-  .editorial-hero-panel {
-    min-height: auto;
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
-    background: transparent;
-    overflow: visible;
-    display: flex;
-    flex-direction: column;
-  }
   .editorial-hero-bg-img {
-    display: none;
+    display: block;
+    object-position: 55% center;
   }
   .editorial-hero-overlay {
-    display: none;
+    display: block;
+    background: 
+      linear-gradient(180deg, 
+        rgba(20, 18, 14, 0.72) 0%, 
+        rgba(20, 18, 14, 0.8) 45%, 
+        rgba(20, 18, 14, 0.95) 100%
+      ),
+      linear-gradient(90deg, 
+        rgba(20, 18, 14, 0.92) 0%, 
+        rgba(20, 18, 14, 0.6) 100%
+      );
   }
   .editorial-hero-nav-slot {
-    padding: 0 0 1rem;
+    padding: 0;
   }
   .landing-nav-container {
-    padding: 0.6rem 1rem;
-    border-radius: 9999px;
-    background-color: #FFFFFF;
+    padding: 0.75rem 1.25rem;
   }
-  .editorial-hero-mobile-image-wrap {
-    display: block;
-    width: 100%;
-    border-radius: 20px;
-    overflow: hidden;
-    margin-bottom: 1.5rem;
-    box-shadow: var(--lp-shadow-card);
-    border: 1px solid var(--lp-surface-light);
-  }
-  .editorial-hero-mobile-img {
-    width: 100%;
-    height: 260px;
-    object-fit: cover;
-    display: block;
+  .editorial-hero-content-wrap {
+    padding: 2rem 1.5rem 3.5rem;
   }
   .editorial-hero-content {
     padding: 0;
     max-width: 100%;
-    color: var(--lp-dark);
-    margin-top: 0;
+    color: #FFFFFF;
   }
   .editorial-hero-tag {
-    color: var(--lp-accent-dark);
-    font-size: 0.6875rem;
-    margin-bottom: 0.75rem;
+    color: var(--lp-accent, #F3F456);
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+  }
+  .editorial-hero-eyebrow-line {
+    width: 28px;
   }
   .editorial-hero-headline {
-    color: var(--lp-dark);
-    font-size: 2.25rem;
-    line-height: 1.15;
-    margin-bottom: 1rem;
-    max-width: 100%;
+    color: #FFFFFF;
+    font-size: clamp(2.35rem, 8.5vw, 3.25rem);
+    line-height: 1.06;
+    margin-bottom: 1.25rem;
   }
   .hero-heading-break {
     display: inline;
   }
   .editorial-hero-subhead {
-    color: var(--lp-text-muted);
+    color: rgba(255, 255, 255, 0.9);
     font-size: 1rem;
-    line-height: 1.5;
-    margin-bottom: 1.75rem;
-    max-width: 100%;
+    line-height: 1.55;
+    margin-bottom: 2rem;
   }
   .editorial-hero-buttons {
     flex-direction: column;
@@ -2893,14 +2899,14 @@
   }
   .editorial-btn-find-parking {
     width: 100%;
-    padding: 0.85rem 1.5rem;
+    padding: 0.875rem 1.5rem;
   }
   .editorial-btn-for-businesses {
     width: 100%;
-    padding: 0.85rem 1.5rem;
-    background-color: transparent;
-    color: var(--lp-dark);
-    border: 1px solid var(--lp-dark);
+    padding: 0.875rem 1.5rem;
+    background-color: rgba(30, 27, 22, 0.55);
+    color: #FFFFFF;
+    border: 1px solid rgba(255, 255, 255, 0.4);
   }
 
   /* Find Parking Section Mobile */

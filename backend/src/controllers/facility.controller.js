@@ -25,6 +25,7 @@ const lotSchema = z.object({
   name: z.string().trim().min(2),
   address: z.string().trim().min(5),
   city: z.string().trim().min(2),
+  postalCode: z.string().trim().max(20).optional().nullable(),
   description: z.string().trim().max(500).optional().nullable(),
   hourlyRate: z.coerce.number().positive(),
   dailyRate: z.coerce.number().positive(),
@@ -33,6 +34,43 @@ const lotSchema = z.object({
   active: z.boolean().optional(),
   latitude: z.coerce.number().min(-90).max(90).optional(),
   longitude: z.coerce.number().min(-180).max(180).optional()
+});
+
+const coordinatesSchema = z.object({
+  x: z.coerce.number().default(0),
+  y: z.coerce.number().default(0),
+  width: z.coerce.number().positive().default(2.5),
+  height: z.coerce.number().positive().default(5.0),
+  rotation: z.coerce.number().min(0).max(360).default(0)
+}).default({});
+
+const spotItemSchema = z.object({
+  number: z.string().trim().min(1, 'Spot identifier is required').max(20),
+  type: z.enum(['STANDARD', 'COMPACT', 'EV', 'ACCESSIBLE']).default('STANDARD'),
+  coordinates: coordinatesSchema.optional()
+});
+
+const floorConfigSchema = z.object({
+  name: z.string().trim().min(1, 'Floor name is required').max(50),
+  floorNumber: z.coerce.number().int(),
+  capacity: z.coerce.number().int().min(1).optional(),
+  spots: z.array(spotItemSchema).min(1, 'Floor must contain at least 1 spot')
+});
+
+const onboardSchema = z.object({
+  name: z.string().trim().min(2, 'Facility name must be at least 2 characters').max(100),
+  address: z.string().trim().min(5, 'Full address must be at least 5 characters'),
+  city: z.string().trim().min(2, 'City is required'),
+  postalCode: z.string().trim().max(20).optional().nullable(),
+  description: z.string().trim().max(500).optional().nullable(),
+  hourlyRate: z.coerce.number().min(0, 'Hourly rate must be non-negative').default(50),
+  dailyRate: z.coerce.number().min(0, 'Daily rate must be non-negative').default(300),
+  openingTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Invalid opening time (HH:MM)').default('00:00'),
+  closingTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Invalid closing time (HH:MM)').default('23:59'),
+  latitude: z.coerce.number().min(-90).max(90, 'Latitude must be between -90 and 90'),
+  longitude: z.coerce.number().min(-180).max(180, 'Longitude must be between -180 and 180'),
+  active: z.boolean().default(true),
+  floors: z.array(floorConfigSchema).min(1, 'Facility must contain at least 1 floor')
 });
 
 const nearbyQuerySchema = z.object({
@@ -128,8 +166,28 @@ async function getFacilityBookings(req, res, next) {
   }
 }
 
+async function onboardFacility(req, res, next) {
+  try {
+    const data = onboardSchema.parse(req.body);
+    const { floors, ...facilityData } = data;
+    const result = await facilityService.onboardFacility({
+      organizationId: req.user.organizationId,
+      userId: req.user.sub,
+      facilityData,
+      floorsData: floors,
+      ipAddress: req.ip
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function createTenant(req, res, next) {
   try {
+    if (req.body && req.body.floors && Array.isArray(req.body.floors)) {
+      return await onboardFacility(req, res, next);
+    }
     const data = lotSchema.parse(req.body);
     const lot = await facilityService.createTenantFacility(
       req.user.organizationId,
@@ -221,6 +279,7 @@ module.exports = {
   listTenant,
   getFacilityBookings,
   createTenant,
+  onboardFacility,
   updateTenant,
   getOccupancy,
   ingestEvent

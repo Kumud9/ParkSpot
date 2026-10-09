@@ -112,11 +112,12 @@ async function seed() {
   for (const u of users) {
     const userDoc = await User.findOneAndUpdate(
       { email: u.email },
-      u,
+      { ...u, isVerified: true, mfaEnabled: false, status: 'ACTIVE' },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     createdUsers[u.email] = userDoc;
   }
+
   console.log(`Seeded ${Object.keys(createdUsers).length} users with B2B & consumer roles.`);
 
   // 3. Create Facilities (Parking Lots) with Real Geographic Coordinates

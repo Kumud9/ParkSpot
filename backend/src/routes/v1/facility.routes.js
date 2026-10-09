@@ -12,11 +12,12 @@ router.get('/nearby', facilityController.getNearby);
 router.get('/search', facilityController.listPublic);
 router.get('/:id/public', facilityController.getPublicById);
 
-// Tenant-scoped B2B Facility management
+// Tenant-scoped B2B Facility management & onboarding
+router.post('/onboard', authenticate, requireTenant, authorize('OWNER', 'ADMIN', 'OPERATOR'), facilityController.onboardFacility);
 router.get('/', authenticate, requireTenant, enforceOperatorFacility, authorize('OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'), facilityController.listTenant);
-router.post('/', authenticate, requireTenant, authorize('OWNER', 'ADMIN'), facilityController.createTenant);
+router.post('/', authenticate, requireTenant, authorize('OWNER', 'ADMIN', 'OPERATOR'), facilityController.createTenant);
 router.get('/:id', facilityController.getPublicById);
-router.patch('/:id', authenticate, requireTenant, enforceOperatorFacility, authorize('OWNER', 'ADMIN'), facilityController.updateTenant);
+router.patch('/:id', authenticate, requireTenant, enforceOperatorFacility, authorize('OWNER', 'ADMIN', 'OPERATOR'), facilityController.updateTenant);
 
 // Facility Bookings for Operator
 router.get('/:facilityId/bookings', authenticate, requireTenant, enforceOperatorFacility, authorize('OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'), facilityController.getFacilityBookings);

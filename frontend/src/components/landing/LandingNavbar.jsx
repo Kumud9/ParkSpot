@@ -41,10 +41,10 @@ export function LandingNavbar({ onOpenAuth }) {
             className="landing-brand-logo-img"
           />
           <span className="landing-brand-wordmark">
-            <span className="landing-wordmark-park">Park</span>
-            <span className="landing-wordmark-spot">Spot</span>
+            ParkSpot
           </span>
         </div>
+
 
         {/* Center: Navigation Links */}
         <div className="landing-nav-center">
@@ -93,7 +93,7 @@ export function LandingNavbar({ onOpenAuth }) {
             onClick={() => navigate('/driver')}
           >
             <span>Get Started</span>
-            <ArrowRight size={15} />
+            <ArrowRight size={14} />
           </button>
 
           {/* Mobile Menu Button */}

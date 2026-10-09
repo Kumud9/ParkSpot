@@ -28,7 +28,7 @@ export function LandingFooter() {
                 alt="ParkSpot"
                 style={{ height: '44px', width: 'auto', objectFit: 'contain' }}
               />
-              <span style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
+              <span style={{ fontSize: '1.65rem', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>
                 <span style={{ color: '#F5A623' }}>Park</span>
                 <span style={{ color: '#FFFFFF' }}>Spot</span>
               </span>

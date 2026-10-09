@@ -181,7 +181,7 @@ export function OperatorExperience({
     if (selectedFacility?.floors && selectedFacility.floors.length > 0) {
       return selectedFacility.floors;
     }
-    return ['Ground Floor', 'Level 1', 'Level 2'];
+    return ['Floor 1'];
   }, [liveOccupancy, facilitySpots, selectedFacility]);
 
   useEffect(() => {
@@ -195,7 +195,7 @@ export function OperatorExperience({
   }, [facilitySpots, activeFloor]);
 
   // Real-time capacity breakdown based on true ParkingSlot records
-  const totalBays = facilitySpots.length || selectedFacility?.totalSpots || selectedFacility?.totalSlots || liveOccupancy?.summary?.totalSpots || 48;
+  const totalBays = facilitySpots.length || selectedFacility?.totalSpots || selectedFacility?.totalSlots || liveOccupancy?.summary?.totalSpots || 0;
   const availableBays = facilitySpots.length > 0
     ? facilitySpots.filter((s) => s.status === 'AVAILABLE').length
     : (liveOccupancy?.summary?.available ?? 0);
@@ -321,30 +321,7 @@ export function OperatorExperience({
   // -------------------------------------------------------------------------
   // OPTIMIZATION RECOMMENDATIONS STATE
   // -------------------------------------------------------------------------
-  const [recommendations, setRecommendations] = useState([
-    {
-      id: 'REC-301',
-      type: 'PRICING_SURGE',
-      title: 'Peak Surge Recommendation: 11:00 – 14:00',
-      reason: 'Demand forecast projects 88% occupancy between 11:00 and 14:00. Algorithmic pricing recommends a +25% peak rate.',
-      currentRate: 40,
-      proposedRate: 50,
-      expectedImpact: 'Projected +18% revenue lift; dampens over-capacity queuing during peak hours.',
-      confidence: '91% (Gradient Boosting ML)',
-      status: 'PENDING'
-    },
-    {
-      id: 'REC-302',
-      type: 'PRICING_DISCOUNT',
-      title: 'Off-Peak Incentive: 21:00 – 06:00',
-      reason: 'Night utilization averages 14%. Lowering entry rate incentivizes overnight residential dwell.',
-      currentRate: 40,
-      proposedRate: 30,
-      expectedImpact: 'Projected +22% night occupancy volume without displacing day travelers.',
-      confidence: '84% (Gradient Boosting ML)',
-      status: 'PENDING'
-    }
-  ]);
+  const [recommendations, setRecommendations] = useState([]);
   const [recsLoading, setRecsLoading] = useState(false);
   const [recsFeedback, setRecsFeedback] = useState(null);
 
@@ -416,34 +393,7 @@ export function OperatorExperience({
   // -------------------------------------------------------------------------
   // OVERSTAY TRIAGE STATE
   // -------------------------------------------------------------------------
-  const [overstays, setOverstays] = useState([
-    {
-      id: 'OVS-101',
-      bookingId: 'BK-8921',
-      spotNumber: 'B4',
-      floor: 'Floor 1',
-      vehiclePlate: 'DL 01 AB 4920',
-      expectedDeparture: '17:00 (Today)',
-      actualState: 'OCCUPIED',
-      durationMinutes: 45,
-      status: 'ACTIVE_OVERSTAY',
-      reasoning: 'Active overstay: Reservation window ended at 17:00 but bay remains occupied with no extension event.',
-      confidence: '94%'
-    },
-    {
-      id: 'OVS-102',
-      bookingId: 'BK-7814',
-      spotNumber: 'A3',
-      floor: 'Floor 2',
-      vehiclePlate: 'HR 26 DQ 8812',
-      expectedDeparture: '15:30 (Today)',
-      actualState: 'AVAILABLE',
-      durationMinutes: 0,
-      status: 'MISSING_DEPARTURE_EVENT',
-      reasoning: 'Departure event has not been recorded within the standard grace window. Bay manually confirmed vacant.',
-      confidence: '82%'
-    }
-  ]);
+  const [overstays, setOverstays] = useState([]);
   const [overstayFilter, setOverstayFilter] = useState('ALL');
   const [overstaysLoading, setOverstaysLoading] = useState(false);
 
@@ -553,19 +503,13 @@ export function OperatorExperience({
   // BUSINESS ANALYTICS STATE
   // -------------------------------------------------------------------------
   const [analyticsData, setAnalyticsData] = useState({
-    totalBookings: 142,
-    activeBookings: 24,
-    completedBookings: 110,
-    cancelledBookings: 8,
-    totalRevenue: 28450,
-    averageDwellHours: 3.2,
-    peakHours: [
-      { hour: 9, bookingCount: 22 },
-      { hour: 11, bookingCount: 38 },
-      { hour: 13, bookingCount: 35 },
-      { hour: 17, bookingCount: 42 },
-      { hour: 19, bookingCount: 29 }
-    ]
+    totalBookings: 0,
+    activeBookings: 0,
+    completedBookings: 0,
+    cancelledBookings: 0,
+    totalRevenue: 0,
+    averageDwellHours: 0,
+    peakHours: []
   });
   const [revenueRestricted, setRevenueRestricted] = useState(false);
 
@@ -1002,12 +946,12 @@ export function OperatorExperience({
             <div>
               <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--ps-primary-dark)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Building2 size={20} style={{ color: 'var(--ps-accent-dark)' }} />
-                {selectedFacility?.name || 'Parul University Parking'}
+                {selectedFacility?.name || 'Registered Facility'}
               </h1>
               <div className="metadata" style={{ fontSize: '0.8125rem', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                <span>{facilityFloors.length} Floors · {totalBays} Spaces</span>
+                <span>{facilityFloors.length} Floor{facilityFloors.length !== 1 ? 's' : ''} · {totalBays} Spaces</span>
                 <span>•</span>
-                <span>{selectedFacility?.city || 'Campus Facility'}</span>
+                <span>{selectedFacility?.city || selectedFacility?.address || 'Operating Location'}</span>
                 <span>•</span>
                 <span style={{ color: 'var(--ps-state-available)', fontWeight: 600 }}>Operating</span>
               </div>
@@ -1310,15 +1254,19 @@ export function OperatorExperience({
                       View All ({bookings.length})
                     </span>
                   </div>
-                  {bookings.slice(0, 3).map((b) => (
-                    <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', padding: '0.4rem 0', borderBottom: '1px solid var(--ps-secondary-light)' }}>
-                      <div>
-                        <strong>Bay {b.spotNumber || 'A-12'}</strong>
-                        <span className="metadata" style={{ marginLeft: '0.4rem' }}>{b.vehiclePlate || 'DL 01 AB 1234'}</span>
+                  {bookings.length === 0 ? (
+                    <p className="metadata" style={{ fontSize: '0.8125rem', padding: '0.5rem 0' }}>No bookings yet.</p>
+                  ) : (
+                    bookings.slice(0, 3).map((b) => (
+                      <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', padding: '0.4rem 0', borderBottom: '1px solid var(--ps-secondary-light)' }}>
+                        <div>
+                          <strong>Bay {b.spotNumber || 'A-12'}</strong>
+                          <span className="metadata" style={{ marginLeft: '0.4rem' }}>{b.vehiclePlate || 'DL 01 AB 1234'}</span>
+                        </div>
+                        <span style={{ color: '#2E7D32', fontWeight: 600 }}>{b.status || 'CONFIRMED'}</span>
                       </div>
-                      <span style={{ color: '#2E7D32', fontWeight: 600 }}>{b.status || 'CONFIRMED'}</span>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
 
                 {/* Overstays Card */}
@@ -1434,93 +1382,101 @@ export function OperatorExperience({
               </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1rem' }}>
-              {recommendations.map((rec) => (
-                <div
-                  key={rec.id}
-                  className="card"
-                  style={{
-                    border: rec.status === 'PENDING' ? '2px solid var(--ps-accent-light)' : '1px solid var(--ps-secondary-light)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between'
-                  }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                      <span className="eyebrow" style={{ color: 'var(--ps-accent-dark)' }}>
-                        {rec.type.replace(/_/g, ' ')}
-                      </span>
-                      <span className={`status-tag ${rec.status === 'ACCEPTED' ? 'available' : rec.status === 'REJECTED' ? 'blocked' : 'selected'}`}>
-                        {rec.status}
-                      </span>
-                    </div>
-
-                    <h3 style={{ fontSize: '1.15rem', marginBottom: '0.4rem' }}>{rec.title}</h3>
-                    <p className="metadata" style={{ marginBottom: '1rem', lineHeight: 1.5 }}>{rec.reason}</p>
-
-                    <div style={{
-                      backgroundColor: 'var(--ps-primary-light)',
-                      borderRadius: 'var(--ps-radius-sm)',
-                      padding: '0.75rem',
-                      marginBottom: '1rem',
-                      fontSize: '0.8125rem',
+            {recommendations.length === 0 ? (
+              <div className="card" style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+                <BrainCircuit size={28} color="var(--ps-accent-dark)" style={{ margin: '0 auto 0.5rem' }} />
+                <h4 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.25rem', color: 'var(--ps-primary-dark)' }}>No active recommendations</h4>
+                <p className="metadata" style={{ margin: 0 }}>Operational signals and dynamic rate recommendations will appear as traffic data builds up.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1rem' }}>
+                {recommendations.map((rec) => (
+                  <div
+                    key={rec.id}
+                    className="card"
+                    style={{
+                      border: rec.status === 'PENDING' ? '2px solid var(--ps-accent-light)' : '1px solid var(--ps-secondary-light)',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '0.35rem'
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span className="metadata">Current Rate:</span>
-                        <strong>₹{rec.currentRate}/hr</strong>
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                        <span className="eyebrow" style={{ color: 'var(--ps-accent-dark)' }}>
+                          {rec.type.replace(/_/g, ' ')}
+                        </span>
+                        <span className={`status-tag ${rec.status === 'ACCEPTED' ? 'available' : rec.status === 'REJECTED' ? 'blocked' : 'selected'}`}>
+                          {rec.status}
+                        </span>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span className="metadata">Proposed Rate:</span>
-                        <strong style={{ color: 'var(--ps-primary-dark)' }}>₹{rec.proposedRate}/hr</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span className="metadata">Expected Impact:</span>
-                        <span style={{ fontWeight: 600 }}>{rec.expectedImpact}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span className="metadata">Model Confidence:</span>
-                        <strong style={{ color: 'var(--ps-state-available)' }}>{rec.confidence}</strong>
+
+                      <h3 style={{ fontSize: '1.15rem', marginBottom: '0.4rem' }}>{rec.title}</h3>
+                      <p className="metadata" style={{ marginBottom: '1rem', lineHeight: 1.5 }}>{rec.reason}</p>
+
+                      <div style={{
+                        backgroundColor: 'var(--ps-primary-light)',
+                        borderRadius: 'var(--ps-radius-sm)',
+                        padding: '0.75rem',
+                        marginBottom: '1rem',
+                        fontSize: '0.8125rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.35rem'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="metadata">Current Rate:</span>
+                          <strong>₹{rec.currentRate}/hr</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="metadata">Proposed Rate:</span>
+                          <strong style={{ color: 'var(--ps-primary-dark)' }}>₹{rec.proposedRate}/hr</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="metadata">Expected Impact:</span>
+                          <span style={{ fontWeight: 600 }}>{rec.expectedImpact}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="metadata">Model Confidence:</span>
+                          <strong style={{ color: 'var(--ps-state-available)' }}>{rec.confidence}</strong>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button
-                      className="btn btn-accent btn-sm"
-                      style={{ flex: 1 }}
-                      onClick={() => handleAcceptRecommendation(rec.id)}
-                      disabled={rec.status === 'ACCEPTED' || activeRole === 'OPERATOR'}
-                      title={activeRole === 'OPERATOR' ? 'Requires Manager or Admin' : 'Apply pricing rule'}
-                    >
-                      {rec.status === 'ACCEPTED' ? 'Rule Active' : 'Accept & Apply'}
-                    </button>
-
-                    {rec.status !== 'ACCEPTED' && (
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handleRejectRecommendation(rec.id)}
-                        disabled={activeRole === 'OPERATOR'}
-                        title={activeRole === 'OPERATOR' ? 'Requires Manager or Admin' : 'Decline recommendation'}
+                        className="btn btn-accent btn-sm"
+                        style={{ flex: 1 }}
+                        onClick={() => handleAcceptRecommendation(rec.id)}
+                        disabled={rec.status === 'ACCEPTED' || activeRole === 'OPERATOR'}
+                        title={activeRole === 'OPERATOR' ? 'Requires Manager or Admin' : 'Apply pricing rule'}
                       >
-                        Reject
+                        {rec.status === 'ACCEPTED' ? 'Rule Active' : 'Accept & Apply'}
                       </button>
-                    )}
 
-                    <button
-                      className="btn btn-outline btn-sm"
-                      onClick={() => handleExplainRecommendationWithAI(rec)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-                    >
-                      <Sparkles size={13} /> Explain
-                    </button>
+                      {rec.status !== 'ACCEPTED' && (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleRejectRecommendation(rec.id)}
+                          disabled={activeRole === 'OPERATOR'}
+                          title={activeRole === 'OPERATOR' ? 'Requires Manager or Admin' : 'Decline recommendation'}
+                        >
+                          Reject
+                        </button>
+                      )}
+
+                      <button
+                        className="btn btn-outline btn-sm"
+                        onClick={() => handleExplainRecommendationWithAI(rec)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                      >
+                        <Sparkles size={13} /> Explain
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
 
         </div>
@@ -2025,7 +1981,8 @@ export function OperatorExperience({
           {filteredBookings.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
               <CalendarCheck size={32} style={{ margin: '0 auto 1rem', color: 'var(--ps-secondary-dark)' }} />
-              <p className="metadata">No reservation records found matching criteria.</p>
+              <h3 style={{ fontSize: '1.1rem', marginBottom: '0.25rem', color: 'var(--ps-primary-dark)' }}>No bookings yet</h3>
+              <p className="metadata">Reservation records will appear here as drivers discover and reserve parking bays.</p>
             </div>
           ) : (
             <div className="data-table-wrapper">
@@ -2301,7 +2258,7 @@ export function OperatorExperience({
               <div>
                 <div className="analytics-kpi-label">Revenue</div>
                 <div className="analytics-kpi-value">
-                  {revenueRestricted ? 'Restricted' : `₹${(analyticsData.totalRevenue || 28450).toLocaleString('en-IN')}`}
+                  {revenueRestricted ? 'Restricted' : `₹${(analyticsData.totalRevenue ?? 0).toLocaleString('en-IN')}`}
                 </div>
               </div>
               <div className="analytics-kpi-trend positive">
@@ -2313,11 +2270,11 @@ export function OperatorExperience({
             <div className="analytics-kpi-card">
               <div>
                 <div className="analytics-kpi-label">Bookings</div>
-                <div className="analytics-kpi-value">{analyticsData.totalBookings || 142}</div>
+                <div className="analytics-kpi-value">{analyticsData.totalBookings ?? 0}</div>
               </div>
               <div className="analytics-kpi-trend neutral">
-                <span>{analyticsData.activeBookings || 24} active</span>
-                <span className="metadata">· {analyticsData.completedBookings || 110} completed</span>
+                <span>{analyticsData.activeBookings ?? 0} active</span>
+                <span className="metadata">· {analyticsData.completedBookings ?? 0} completed</span>
               </div>
             </div>
           </div>
@@ -2532,8 +2489,15 @@ export function OperatorExperience({
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1rem' }}>
-            {recommendations.map((rec) => (
+          {recommendations.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
+              <BrainCircuit size={36} color="var(--ps-accent-dark)" style={{ margin: '0 auto 1rem' }} />
+              <h3 style={{ fontSize: '1.15rem', marginBottom: '0.35rem' }}>No Recommendations Yet</h3>
+              <p className="metadata">Operational optimization will generate recommendations as demand patterns emerge.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1rem' }}>
+              {recommendations.map((rec) => (
               <div key={rec.id} className="card" style={{ border: rec.status === 'PENDING' ? '2px solid var(--ps-accent-light)' : '1px solid var(--ps-secondary-light)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
                   <span className="eyebrow" style={{ color: 'var(--ps-accent-dark)' }}>{rec.type.replace(/_/g, ' ')}</span>
@@ -2601,8 +2565,9 @@ export function OperatorExperience({
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+    )}
 
       {/* =====================================================================
           TAB 10: DYNAMIC PRICING & SIMULATION (WHAT-IF ENGINE)
@@ -2747,6 +2712,26 @@ export function OperatorExperience({
               ))}
             </div>
           </div>
+
+          {/* Meaningful empty state / cold-start notice for fresh facility */}
+          {(!bookings || bookings.length === 0) && (
+            <div style={{
+              backgroundColor: 'rgba(178, 162, 64, 0.12)',
+              border: '1px solid var(--ps-accent-dark)',
+              borderRadius: 'var(--ps-radius-sm)',
+              padding: '0.85rem 1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.65rem',
+              fontSize: '0.875rem',
+              color: 'var(--ps-primary-dark)'
+            }}>
+              <Info size={18} style={{ color: 'var(--ps-accent-dark)', flexShrink: 0 }} />
+              <div>
+                <strong>Initial Facility State:</strong> Forecasts will improve as operational data is collected.
+              </div>
+            </div>
+          )}
 
           {/* FORECAST SUMMARY */}
           <div className="forecast-summary-grid">

@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
@@ -6,6 +7,8 @@ const { app } = require('../src');
 const { connectDatabase } = require('../src/db');
 const { User, Organization } = require('../src/models');
 const authService = require('../src/services/auth.service');
+const totpService = require('../src/services/totp.service');
+
 
 function makeRequest(server, path, method = 'GET', token = null, body = null) {
   return new Promise((resolve, reject) => {
@@ -252,10 +255,23 @@ test('PARKSPOT SIGNUP VERIFICATION: Secure 2-Step OTP Verification Test Suite', 
 
   // 13. Existing login/authentication works after verification
   await t.test('13. User can log in normally and access protected APIs after verification', async () => {
-    const loginRes = await makeRequest(server, '/api/v1/auth/login', 'POST', null, {
+    let loginRes = await makeRequest(server, '/api/v1/auth/login', 'POST', null, {
       email: testDriverEmail,
       password: 'StrongPassword@123'
     });
+
+    if (loginRes.body.requiresMfa) {
+      const dbUser = await User.findOne({ email: testDriverEmail });
+      const secret = totpService.decryptSecret({
+        encrypted: dbUser.totpSecretEncrypted,
+        iv: dbUser.totpSecretIv,
+        tag: dbUser.totpSecretAuthTag
+      });
+      loginRes = await makeRequest(server, '/api/v1/auth/mfa/verify-login', 'POST', null, {
+        mfaToken: loginRes.body.mfaToken,
+        code: totpService.generateCurrentTotp(secret)
+      });
+    }
 
     assert.equal(loginRes.status, 200);
     assert.ok(loginRes.body.token);
@@ -291,11 +307,24 @@ test('PARKSPOT SIGNUP VERIFICATION: Secure 2-Step OTP Verification Test Suite', 
     assert.equal(opVerify.body.user.isVerified, true);
     assert.equal(opVerify.body.user.accountType, 'OPERATOR');
 
-    const opLogin = await makeRequest(server, '/api/v1/auth/login', 'POST', null, {
+    let opLogin = await makeRequest(server, '/api/v1/auth/login', 'POST', null, {
       email: testOperatorEmail,
       password: 'StrongPassword@123'
     });
+    if (opLogin.body.requiresMfa) {
+      const dbUser = await User.findOne({ email: testOperatorEmail });
+      const secret = totpService.decryptSecret({
+        encrypted: dbUser.totpSecretEncrypted,
+        iv: dbUser.totpSecretIv,
+        tag: dbUser.totpSecretAuthTag
+      });
+      opLogin = await makeRequest(server, '/api/v1/auth/mfa/verify-login', 'POST', null, {
+        mfaToken: opLogin.body.mfaToken,
+        code: totpService.generateCurrentTotp(secret)
+      });
+    }
     assert.equal(opLogin.status, 200);
     assert.equal(opLogin.body.user.accountType, 'OPERATOR');
   });
 });
+

@@ -1,9 +1,12 @@
+process.env.NODE_ENV = 'test';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { connectDatabase } = require('../src/db');
 const { User, Organization } = require('../src/models');
 const authService = require('../src/services/auth.service');
+const totpService = require('../src/services/totp.service');
+
 
 test('auth: 2-step signup verification, OTP security, rate limits, and authentication flow', async (t) => {
   await connectDatabase();
@@ -197,10 +200,23 @@ test('auth: 2-step signup verification, OTP security, rate limits, and authentic
   );
 
   // 13. Login works successfully after verification
-  const loginResult = await authService.login({
+  let loginResult = await authService.login({
     email,
     password: 'Password@123'
   });
+  if (loginResult.requiresMfa) {
+    const dbUser = await User.findOne({ email });
+    const secret = totpService.decryptSecret({
+      encrypted: dbUser.totpSecretEncrypted,
+      iv: dbUser.totpSecretIv,
+      tag: dbUser.totpSecretAuthTag
+    });
+    loginResult = await authService.verifyMfaLogin({
+      email,
+      mfaToken: loginResult.mfaToken,
+      code: totpService.generateCurrentTotp(secret)
+    });
+  }
   assert.ok(loginResult.token, 'Login must return an authenticated JWT');
   assert.equal(loginResult.user.email, email);
   assert.equal(loginResult.user.accountType, 'DRIVER');
@@ -231,10 +247,23 @@ test('auth: 2-step signup verification, OTP security, rate limits, and authentic
   assert.equal(b2bVerify.user.isVerified, true);
 
   // Verify login as Operator returns authoritative accountType and internalRole
-  const b2bLogin = await authService.login({
+  let b2bLogin = await authService.login({
     email: b2bEmail,
     password: 'Password@123'
   });
+  if (b2bLogin.requiresMfa) {
+    const dbUser = await User.findOne({ email: b2bEmail });
+    const secret = totpService.decryptSecret({
+      encrypted: dbUser.totpSecretEncrypted,
+      iv: dbUser.totpSecretIv,
+      tag: dbUser.totpSecretAuthTag
+    });
+    b2bLogin = await authService.verifyMfaLogin({
+      email: b2bEmail,
+      mfaToken: b2bLogin.mfaToken,
+      code: totpService.generateCurrentTotp(secret)
+    });
+  }
   assert.equal(b2bLogin.user.accountType, 'OPERATOR');
   assert.equal(b2bLogin.user.internalRole, 'OWNER');
 
@@ -243,4 +272,5 @@ test('auth: 2-step signup verification, OTP security, rate limits, and authentic
   if (b2bResult.user.organizationId) {
     await Organization.deleteOne({ _id: b2bResult.user.organizationId });
   }
+
 });

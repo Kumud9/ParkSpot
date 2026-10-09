@@ -9,8 +9,8 @@ function authenticate(req, _res, next) {
   }
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
-    if (req.user.purpose === 'SIGNUP_VERIFICATION') {
-      return next(new AppError(403, 'VERIFICATION_REQUIRED', 'Please verify your account to access this service.'));
+    if (['SIGNUP_VERIFICATION', 'MFA_SETUP', 'MFA_LOGIN'].includes(req.user.purpose)) {
+      return next(new AppError(403, 'VERIFICATION_REQUIRED', 'Please complete two-factor authentication to access this service.'));
     }
     if (!req.user.accountType) {
       req.user.accountType = ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(req.user.role) ? 'OPERATOR' : 'DRIVER';
@@ -70,8 +70,8 @@ async function enforceOperatorFacility(req, _res, next) {
   if (!req.user) {
     return next(new AppError(401, 'AUTH_REQUIRED', 'Authentication is required.'));
   }
-  const isDedicatedOperator = req.user.internalRole === 'OPERATOR' || req.user.role === 'OPERATOR';
-  if (!isDedicatedOperator) {
+  const isOperatorAccount = req.user.accountType === 'OPERATOR' || ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(req.user.internalRole) || ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(req.user.role);
+  if (!isOperatorAccount) {
     return next();
   }
 
@@ -99,6 +99,22 @@ async function enforceOperatorFacility(req, _res, next) {
     } catch (err) {
       return next(err);
     }
+  }
+
+  // Operator has no facility registered yet
+  if (!req.facilityId) {
+    const isFacilitiesCollectionGet = req.method === 'GET' && req.baseUrl && req.baseUrl.endsWith('/facilities') && !req.params.id && !req.params.facilityId;
+    const isOnboardingPost = req.path && (req.path.includes('/onboard') || req.path === '/');
+    if (!isFacilitiesCollectionGet && !isOnboardingPost) {
+      return next(
+        new AppError(
+          403,
+          'FACILITY_REQUIRED',
+          'Operator onboarding required: Please complete facility registration before accessing operational features.'
+        )
+      );
+    }
+    return next();
   }
 
   const requestedFacilityId = req.params?.facilityId || req.params?.id || req.query?.facilityId || req.body?.facilityId;

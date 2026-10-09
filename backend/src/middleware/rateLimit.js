@@ -26,4 +26,18 @@ const authLimiter = rateLimit({
   }
 });
 
-module.exports = { globalLimiter, authLimiter };
+const mfaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MFA_MAX || (isDev ? '10000' : '20'), 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => isRateLimitDisabled,
+  message: {
+    error: {
+      code: 'TOO_MANY_REQUESTS',
+      message: 'Too many verification attempts from this IP. Please try again later.'
+    }
+  }
+});
+
+module.exports = { globalLimiter, authLimiter, mfaLimiter };

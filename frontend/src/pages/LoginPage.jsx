@@ -9,17 +9,20 @@ import {
   ArrowRight,
   ArrowLeft,
   ShieldAlert,
+  ShieldCheck,
   CheckCircle2,
-  Clock,
-  Mail,
-  RotateCcw
+  Key,
+  Copy,
+  Check,
+  Smartphone,
+  Lock
 } from 'lucide-react';
 import './login.css';
 
 export function LoginPage({ onAuthSuccess }) {
   const navigate = useNavigate();
   const { portal } = useParams();
-  const { login, signup, verifySignup, resendSignupOtp } = useAuth();
+  const { login, signup, verifyMfaSetup, verifyMfaLogin, verifyMfaRecovery } = useAuth();
 
   // Normalize route param: null | 'driver' | 'operator'
   const normalizedPortal = portal === 'driver' || portal === 'operator' ? portal : null;
@@ -39,41 +42,35 @@ export function LoginPage({ onAuthSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Verification states
-  const [isVerifying, setIsVerifying] = useState(false);
+  // 2FA / TOTP states
+  // mfaMode: null | 'SETUP' | 'LOGIN' | 'RECOVERY'
+  const [mfaMode, setMfaMode] = useState(null);
   const [verifyEmail, setVerifyEmail] = useState('');
-  const [verifyToken, setVerifyToken] = useState(null);
+  const [setupToken, setSetupToken] = useState(null);
+  const [mfaToken, setMfaToken] = useState(null);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState(null);
+  const [manualSetupKey, setManualSetupKey] = useState(null);
+  const [showManualKey, setShowManualKey] = useState(false);
+  const [recoveryCodes, setRecoveryCodes] = useState([]);
+  const [copiedKey, setCopiedKey] = useState(false);
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
-  const [cooldownSeconds, setCooldownSeconds] = useState(60);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendNotice, setResendNotice] = useState(null);
+  const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
   const [verifySuccess, setVerifySuccess] = useState(false);
 
   const otpInputRefs = useRef([]);
 
-  // Cooldown countdown timer
+  // Auto-focus first digit when entering MFA
   useEffect(() => {
-    let timer;
-    if (isVerifying && cooldownSeconds > 0) {
-      timer = setInterval(() => {
-        setCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
-      }, 1000);
-    }
-    return () => clearInterval(timer);
-  }, [isVerifying, cooldownSeconds]);
-
-  // Auto-focus first OTP digit when entering verification
-  useEffect(() => {
-    if (isVerifying && otpInputRefs.current[0]) {
+    if ((mfaMode === 'SETUP' || mfaMode === 'LOGIN') && otpInputRefs.current[0]) {
       otpInputRefs.current[0].focus();
     }
-  }, [isVerifying]);
+  }, [mfaMode]);
 
   const handleSelectPortal = (target) => {
     setSelectedPortal(target);
     setError(null);
     setIsSignUp(false);
-    setIsVerifying(false);
+    setMfaMode(null);
     setEmail('');
     setPassword('');
     setName('');
@@ -83,15 +80,21 @@ export function LoginPage({ onAuthSuccess }) {
   const handleBackToPortals = () => {
     setSelectedPortal(null);
     setError(null);
-    setIsVerifying(false);
+    setMfaMode(null);
     navigate('/login');
+  };
+
+  const handleCopyKey = () => {
+    if (!manualSetupKey) return;
+    navigator.clipboard.writeText(manualSetupKey);
+    setCopiedKey(true);
+    setTimeout(() => setCopiedKey(false), 2000);
   };
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setResendNotice(null);
 
     const portalAccountType = selectedPortal === 'driver' ? 'DRIVER' : 'OPERATOR';
 
@@ -105,13 +108,16 @@ export function LoginPage({ onAuthSuccess }) {
           organizationName: selectedPortal === 'operator' ? `${(name || 'My').trim()}'s Operations` : undefined
         });
 
-        if (signupRes?.status === 'PENDING_VERIFICATION' || signupRes?.requiresVerification) {
-          // Transition to dedicated OTP verification step
-          setIsVerifying(true);
+        if (signupRes?.status === 'PENDING_VERIFICATION' || signupRes?.requiresMfaSetup || signupRes?.requiresVerification) {
+          // Transition to TOTP Authenticator enrollment
+          setMfaMode('SETUP');
           setVerifyEmail(email.trim());
-          setVerifyToken(signupRes.verificationToken || null);
+          setSetupToken(signupRes.setupToken || signupRes.verificationToken || null);
+          setQrCodeDataUrl(signupRes.qrCodeDataUrl || null);
+          setManualSetupKey(signupRes.manualSetupKey || null);
+          setRecoveryCodes(signupRes.recoveryCodes || []);
+          setShowManualKey(false);
           setOtpDigits(['', '', '', '', '', '']);
-          setCooldownSeconds(60);
           setError(null);
           return;
         }
@@ -121,21 +127,27 @@ export function LoginPage({ onAuthSuccess }) {
           completeAuth(signupRes);
         }
       } else {
-        const authUser = await login(email.trim(), password, portalAccountType);
-        if (authUser) {
-          completeAuth(authUser);
+        const authRes = await login(email.trim(), password, portalAccountType);
+
+        if (authRes?.requiresMfa || authRes?.status === 'MFA_REQUIRED') {
+          // Transition to Login 2-Step Verification
+          setMfaMode('LOGIN');
+          setVerifyEmail(email.trim());
+          setMfaToken(authRes.mfaToken);
+          setOtpDigits(['', '', '', '', '', '']);
+          setError(null);
+          return;
+        }
+
+        if (authRes?.id || authRes?.email) {
+          completeAuth(authRes);
         } else {
           setError('Login failed. Please verify credentials.');
         }
       }
     } catch (err) {
       if (err.code === 'VERIFICATION_REQUIRED' || err.message?.toLowerCase().includes('verify')) {
-        // Unverified user tried logging in: smoothly prompt for OTP
-        setIsVerifying(true);
-        setVerifyEmail(email.trim());
-        setOtpDigits(['', '', '', '', '', '']);
-        setCooldownSeconds(60);
-        setError('Your account is pending verification. Please enter the 6-digit code sent to your email.');
+        setError('Please complete two-factor authentication setup to activate your account.');
       } else {
         setError(err.message || 'Authentication error.');
       }
@@ -151,7 +163,11 @@ export function LoginPage({ onAuthSuccess }) {
       (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(authUser.role) ? 'OPERATOR' : 'DRIVER');
 
     if (effectiveAccountType === 'OPERATOR') {
-      navigate('/operator', { replace: true });
+      if (!authUser.facilityId && !authUser.facility) {
+        navigate('/operator/onboarding', { replace: true });
+      } else {
+        navigate('/operator', { replace: true });
+      }
     } else {
       navigate('/driver', { replace: true });
     }
@@ -204,23 +220,23 @@ export function LoginPage({ onAuthSuccess }) {
     otpInputRefs.current[nextIndex]?.focus();
   };
 
-  const handleVerifyOtp = async (e) => {
+  // Setup TOTP Verification Handler
+  const handleVerifySetupTotp = async (e) => {
     e.preventDefault();
-    const otpCode = otpDigits.join('');
-    if (otpCode.length !== 6) {
-      setError('Please enter all 6 digits of your verification code.');
+    const enteredCode = otpDigits.join('');
+    if (enteredCode.length !== 6) {
+      setError('Please enter all 6 digits of your authenticator code.');
       return;
     }
 
     setLoading(true);
     setError(null);
-    setResendNotice(null);
 
     try {
-      const verifiedUser = await verifySignup({
+      const verifiedUser = await verifyMfaSetup({
         email: verifyEmail,
-        otp: otpCode,
-        token: verifyToken
+        code: enteredCode,
+        setupToken
       });
 
       setVerifySuccess(true);
@@ -234,25 +250,62 @@ export function LoginPage({ onAuthSuccess }) {
     }
   };
 
-  const handleResendOtp = async () => {
-    if (cooldownSeconds > 0 || resendLoading) return;
-    setResendLoading(true);
+  // Login TOTP Verification Handler
+  const handleVerifyLoginTotp = async (e) => {
+    e.preventDefault();
+    const enteredCode = otpDigits.join('');
+    if (enteredCode.length !== 6) {
+      setError('Please enter all 6 digits from your authenticator app.');
+      return;
+    }
+
+    setLoading(true);
     setError(null);
-    setResendNotice(null);
 
     try {
-      await resendSignupOtp({
+      const verifiedUser = await verifyMfaLogin({
         email: verifyEmail,
-        token: verifyToken
+        code: enteredCode,
+        mfaToken
       });
-      setCooldownSeconds(60);
-      setOtpDigits(['', '', '', '', '', '']);
-      setResendNotice('A new 6-digit verification code has been sent to your email.');
-      otpInputRefs.current[0]?.focus();
+
+      setVerifySuccess(true);
+      setTimeout(() => {
+        completeAuth(verifiedUser);
+      }, 700);
     } catch (err) {
-      setError(err.message || 'Could not resend verification code. Please try again later.');
+      setError(err.message || 'Invalid verification code.');
     } finally {
-      setResendLoading(false);
+      setLoading(false);
+    }
+  };
+
+  // Login Backup Recovery Code Handler
+  const handleVerifyRecoveryCode = async (e) => {
+    e.preventDefault();
+    if (!recoveryCodeInput.trim()) {
+      setError('Please enter your backup recovery code.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const verifiedUser = await verifyMfaRecovery({
+        email: verifyEmail,
+        recoveryCode: recoveryCodeInput.trim(),
+        mfaToken
+      });
+
+      setVerifySuccess(true);
+      setTimeout(() => {
+        completeAuth(verifiedUser);
+      }, 700);
+    } catch (err) {
+      setError(err.message || 'Invalid or already used recovery code.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -333,14 +386,16 @@ export function LoginPage({ onAuthSuccess }) {
               Return to Public Landing Page
             </button>
           </>
-        ) : isVerifying ? (
-          /* Step 2-B: Dedicated OTP Verification Step */
+        ) : mfaMode === 'SETUP' ? (
+          /* ------------------------------------------------------------- */
+          /* Step 2-B: TOTP Authenticator Enrollment Screen (Signup 2FA)   */
+          /* ------------------------------------------------------------- */
           <>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
               <button
                 type="button"
                 onClick={() => {
-                  setIsVerifying(false);
+                  setMfaMode(null);
                   setError(null);
                 }}
                 className="portal-back-btn"
@@ -349,14 +404,14 @@ export function LoginPage({ onAuthSuccess }) {
                 Back to Sign In
               </button>
               <span className="portal-header-badge">
-                {selectedPortal} Verification
+                2-Step Verification
               </span>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'center', margin: '0.5rem 0 1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '0.25rem 0 0.75rem' }}>
               <div style={{
-                width: '52px',
-                height: '52px',
+                width: '48px',
+                height: '48px',
                 borderRadius: '50%',
                 backgroundColor: 'var(--ps-primary-light, #F4F2E7)',
                 color: 'var(--ps-primary-dark, #25221B)',
@@ -365,16 +420,15 @@ export function LoginPage({ onAuthSuccess }) {
                 justifyContent: 'center',
                 border: '1px solid var(--ps-secondary-light, #E6DFD1)'
               }}>
-                <Mail size={26} />
+                <Smartphone size={24} />
               </div>
             </div>
 
             <h2 className="portal-title" style={{ fontSize: '1.45rem' }}>
-              Verify your account
+              Set up 2-step verification
             </h2>
-            <p className="portal-subtitle" style={{ marginBottom: '1.5rem', lineHeight: 1.5 }}>
-              We've sent a 6-digit verification code to <strong style={{ color: 'var(--ps-primary-dark, #25221B)' }}>{verifyEmail}</strong>.
-              Enter it below to activate your account.
+            <p className="portal-subtitle" style={{ marginBottom: '1rem', lineHeight: 1.45 }}>
+              Protect your ParkSpot account with an authenticator app.
             </p>
 
             {error && (
@@ -384,21 +438,76 @@ export function LoginPage({ onAuthSuccess }) {
               </div>
             )}
 
-            {resendNotice && (
-              <div className="auth-success-banner">
-                <CheckCircle2 size={16} />
-                <span>{resendNotice}</span>
-              </div>
-            )}
-
             {verifySuccess && (
               <div className="auth-success-banner">
                 <CheckCircle2 size={16} />
-                <span>Account verified successfully! Redirecting...</span>
+                <span>Account verified and 2-step verification enabled! Redirecting...</span>
               </div>
             )}
 
-            <form onSubmit={handleVerifyOtp}>
+            {/* REAL TOTP QR CODE */}
+            {qrCodeDataUrl ? (
+              <div className="totp-qr-container">
+                <img
+                  src={qrCodeDataUrl}
+                  alt="Scan with Google Authenticator or Microsoft Authenticator"
+                  className="totp-qr-image"
+                />
+              </div>
+            ) : null}
+
+            <p className="totp-instruction-text">
+              Scan this QR code using Google Authenticator, Microsoft Authenticator, or another compatible authenticator app.
+            </p>
+
+            {/* MANUAL SETUP KEY TOGGLE */}
+            {manualSetupKey && (
+              <div className="totp-manual-toggle">
+                <button
+                  type="button"
+                  onClick={() => setShowManualKey(!showManualKey)}
+                  className="totp-text-link"
+                >
+                  {showManualKey ? "Hide manual setup key" : "Can't scan the QR code? Enter setup key manually"}
+                </button>
+                {showManualKey && (
+                  <div className="totp-manual-box">
+                    <code className="totp-key-code">{manualSetupKey}</code>
+                    <button
+                      type="button"
+                      onClick={handleCopyKey}
+                      className="totp-copy-btn"
+                      title="Copy setup key"
+                    >
+                      {copiedKey ? <Check size={13} /> : <Copy size={13} />}
+                      {copiedKey ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* BACKUP RECOVERY CODES DISPLAY */}
+            {recoveryCodes && recoveryCodes.length > 0 && (
+              <div className="totp-recovery-box">
+                <div className="totp-recovery-header">
+                  <strong>Save these recovery codes somewhere safe.</strong>
+                  <span className="totp-recovery-sub">Each recovery code can only be used once if you lose access to your authenticator.</span>
+                </div>
+                <div className="totp-recovery-grid">
+                  {recoveryCodes.map((code, idx) => (
+                    <code key={idx} className="totp-recovery-item">{code}</code>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 6-DIGIT CODE INPUT */}
+            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--ps-primary-dark, #25221B)', marginTop: '0.5rem', marginBottom: '0.25rem' }}>
+              Enter the 6-digit code generated by your authenticator app
+            </p>
+
+            <form onSubmit={handleVerifySetupTotp}>
               <div className="otp-inputs-row" onPaste={handleOtpPaste}>
                 {otpDigits.map((digit, index) => (
                   <input
@@ -427,37 +536,227 @@ export function LoginPage({ onAuthSuccess }) {
                 {loading ? (
                   <ActionLoader text="Activating account..." />
                 ) : verifySuccess ? (
-                  'Account Verified ✓'
+                  'Account Activated ✓'
                 ) : (
                   'Verify & Activate Account'
                 )}
               </button>
+            </form>
+          </>
+        ) : mfaMode === 'LOGIN' ? (
+          /* ------------------------------------------------------------- */
+          /* Step 2-C: Login 2-Step Verification Screen                    */
+          /* ------------------------------------------------------------- */
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMfaMode(null);
+                  setError(null);
+                }}
+                className="portal-back-btn"
+              >
+                <ArrowLeft size={14} />
+                Back to Sign In
+              </button>
+              <span className="portal-header-badge">
+                Security Check
+              </span>
+            </div>
 
-              <div className="otp-resend-row">
-                <span style={{ color: 'var(--ps-secondary-dark, #707371)' }}>
-                  Didn't receive the code?
-                </span>
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '0.5rem 0 1rem' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--ps-primary-light, #F4F2E7)',
+                color: 'var(--ps-primary-dark, #25221B)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid var(--ps-secondary-light, #E6DFD1)'
+              }}>
+                <ShieldCheck size={24} />
+              </div>
+            </div>
 
-                {cooldownSeconds > 0 ? (
-                  <span className="otp-cooldown-badge">
-                    <Clock size={13} />
-                    Resend in 00:{cooldownSeconds < 10 ? `0${cooldownSeconds}` : cooldownSeconds}
-                  </span>
+            <h2 className="portal-title" style={{ fontSize: '1.45rem' }}>
+              Two-step verification
+            </h2>
+            <p className="portal-subtitle" style={{ marginBottom: '1.5rem', lineHeight: 1.45 }}>
+              Enter the 6-digit code from your authenticator app.
+            </p>
+
+            {error && (
+              <div className="auth-error-banner">
+                <ShieldAlert size={16} />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {verifySuccess && (
+              <div className="auth-success-banner">
+                <CheckCircle2 size={16} />
+                <span>Verification successful! Signing in...</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyLoginTotp}>
+              <div className="otp-inputs-row" onPaste={handleOtpPaste}>
+                {otpDigits.map((digit, index) => (
+                  <input
+                    key={index}
+                    ref={(el) => (otpInputRefs.current[index] = el)}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOtpChange(index, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                    className={`otp-digit-box ${digit ? 'filled' : ''}`}
+                    disabled={loading || verifySuccess}
+                    aria-label={`Digit ${index + 1} of verification code`}
+                  />
+                ))}
+              </div>
+
+              <button
+                type="submit"
+                className="auth-submit-btn"
+                disabled={loading || verifySuccess || otpDigits.join('').length !== 6}
+                style={{ marginTop: '1rem' }}
+              >
+                {loading ? (
+                  <ActionLoader text="Verifying code..." />
+                ) : verifySuccess ? (
+                  'Verified ✓'
                 ) : (
-                  <button
-                    type="button"
-                    className="otp-resend-btn"
-                    onClick={handleResendOtp}
-                    disabled={resendLoading || loading}
-                  >
-                    {resendLoading ? 'Sending...' : 'Resend Code'}
-                  </button>
+                  'Verify & Continue'
                 )}
+              </button>
+
+              <div style={{ marginTop: '1.25rem', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMfaMode('RECOVERY');
+                    setError(null);
+                  }}
+                  className="totp-text-link"
+                >
+                  Use a recovery code
+                </button>
+              </div>
+            </form>
+          </>
+        ) : mfaMode === 'RECOVERY' ? (
+          /* ------------------------------------------------------------- */
+          /* Step 2-D: Backup Recovery Code Verification Screen             */
+          /* ------------------------------------------------------------- */
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMfaMode('LOGIN');
+                  setError(null);
+                }}
+                className="portal-back-btn"
+              >
+                <ArrowLeft size={14} />
+                Back to Authenticator
+              </button>
+              <span className="portal-header-badge">
+                Account Recovery
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '0.5rem 0 1rem' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--ps-primary-light, #F4F2E7)',
+                color: 'var(--ps-primary-dark, #25221B)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid var(--ps-secondary-light, #E6DFD1)'
+              }}>
+                <Key size={24} />
+              </div>
+            </div>
+
+            <h2 className="portal-title" style={{ fontSize: '1.45rem' }}>
+              Use backup recovery code
+            </h2>
+            <p className="portal-subtitle" style={{ marginBottom: '1.5rem', lineHeight: 1.45 }}>
+              Enter one of the 8-character backup codes you saved during 2-step verification setup.
+            </p>
+
+            {error && (
+              <div className="auth-error-banner">
+                <ShieldAlert size={16} />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {verifySuccess && (
+              <div className="auth-success-banner">
+                <CheckCircle2 size={16} />
+                <span>Recovery code accepted! Signing in...</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyRecoveryCode}>
+              <div className="auth-input-group" style={{ marginBottom: '1.25rem' }}>
+                <label className="auth-input-label">Backup Recovery Code</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 7F3A-9C2E"
+                  value={recoveryCodeInput}
+                  onChange={(e) => setRecoveryCodeInput(e.target.value.toUpperCase())}
+                  className="auth-text-input"
+                  style={{ fontFamily: 'var(--ps-font-mono, monospace)', letterSpacing: '0.1em', textAlign: 'center', fontSize: '1.1rem' }}
+                  disabled={loading || verifySuccess}
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="auth-submit-btn"
+                disabled={loading || verifySuccess || !recoveryCodeInput.trim()}
+              >
+                {loading ? (
+                  <ActionLoader text="Validating code..." />
+                ) : verifySuccess ? (
+                  'Verified ✓'
+                ) : (
+                  'Verify & Continue'
+                )}
+              </button>
+
+              <div style={{ marginTop: '1.25rem', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMfaMode('LOGIN');
+                    setError(null);
+                  }}
+                  className="totp-text-link"
+                >
+                  Enter code from authenticator app instead
+                </button>
               </div>
             </form>
           </>
         ) : (
-          /* Step 2-A: Selected Portal Authentication Form */
+          /* ------------------------------------------------------------- */
+          /* Step 2-A: Selected Portal Authentication Form (Email/Password) */
+          /* ------------------------------------------------------------- */
           <>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
               <button type="button" onClick={handleBackToPortals} className="portal-back-btn">

@@ -302,26 +302,78 @@ export const api = {
   },
 
   /**
-   * Auth: Verify 6-digit signup OTP
+   * Auth: Verify 6-digit signup TOTP setup challenge
    */
-  async verifySignup({ email, otp, token }) {
-    const data = await request('/api/v1/auth/verify-signup', {
+  async verifyMfaSetup({ email, code, otp, setupToken, token }) {
+    const data = await request('/api/v1/auth/mfa/verify-setup', {
       method: 'POST',
-      body: JSON.stringify({ email, otp, token })
+      body: JSON.stringify({
+        email,
+        code: code || otp,
+        setupToken: setupToken || token
+      })
     });
     return data;
   },
 
   /**
-   * Auth: Resend 6-digit signup OTP with cooldown
+   * Auth: Verify 6-digit TOTP code during login
    */
-  async resendSignupOtp({ email, token }) {
-    const data = await request('/api/v1/auth/resend-signup-otp', {
+  async verifyMfaLogin({ email, code, otp, mfaToken, token }) {
+    const data = await request('/api/v1/auth/mfa/verify-login', {
       method: 'POST',
-      body: JSON.stringify({ email, token })
+      body: JSON.stringify({
+        email,
+        code: code || otp,
+        mfaToken: mfaToken || token
+      })
     });
     return data;
   },
+
+  /**
+   * Auth: Verify one-time backup recovery code during login
+   */
+  async verifyMfaRecovery({ email, recoveryCode, mfaToken, token }) {
+    const data = await request('/api/v1/auth/mfa/verify-recovery', {
+      method: 'POST',
+      body: JSON.stringify({
+        email,
+        recoveryCode,
+        mfaToken: mfaToken || token
+      })
+    });
+    return data;
+  },
+
+  /**
+   * Auth: Verify 6-digit signup OTP / TOTP (alias)
+   */
+  async verifySignup({ email, otp, code, token, setupToken }) {
+    const data = await request('/api/v1/auth/verify-signup', {
+      method: 'POST',
+      body: JSON.stringify({
+        email,
+        code: code || otp,
+        otp: otp || code,
+        token: token || setupToken,
+        setupToken: setupToken || token
+      })
+    });
+    return data;
+  },
+
+  /**
+   * Auth: Resend / refresh 2-step setup challenge
+   */
+  async resendSignupOtp({ email, token, setupToken }) {
+    const data = await request('/api/v1/auth/resend-signup-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, token: token || setupToken })
+    });
+    return data;
+  },
+
 
   /**
    * Auth: Fetch current authenticated profile
@@ -557,6 +609,24 @@ export const api = {
    */
   async ensureOperatorAuth() {
     return authStorage.getToken();
+  },
+
+  /**
+   * Operator: Register and onboard single facility with floors and spots
+   */
+  async onboardFacility(payload) {
+    api.requireToken();
+    const data = await request('/api/v1/facilities/onboard', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    if (data?.token) {
+      authStorage.setToken(data.token);
+    }
+    if (data?.user) {
+      authStorage.setUser(data.user);
+    }
+    return data;
   },
 
   /**

@@ -14,68 +14,64 @@ export function HeroSection({ onOpenAuth }) {
 
   return (
     <section className="editorial-hero" id="hero">
-      <div className="editorial-hero-container">
-        {/* Large Rounded Hero Panel */}
-        <div className="editorial-hero-panel">
-          {/* Hero Photographic Background (Cover / Center) */}
-          <img
-            src="/assets/parkspot-hero.jpg"
-            alt="ParkSpot managed parking architectural facility"
-            className="editorial-hero-bg-img"
-            loading="eager"
-            onError={(e) => {
-              e.currentTarget.src = '/assets/parking-residential.webp';
-            }}
-          />
+      {/* Background Image: Full-bleed cover */}
+      <img
+        src="/assets/parkspot-hero.jpg"
+        alt="ParkSpot modern managed parking facility"
+        className="editorial-hero-bg-img"
+        loading="eager"
+        onError={(e) => {
+          e.currentTarget.src = '/assets/parking-residential.webp';
+        }}
+      />
 
-          {/* Subtle Dark/Neutral Photographic Gradient Overlay */}
-          <div className="editorial-hero-overlay" />
+      {/* Dark Left-Side Gradient Overlay */}
+      <div className="editorial-hero-overlay" />
 
-          {/* 4. Integrated Navigation Pill inside the Hero Composition */}
-          <div className="editorial-hero-nav-slot">
-            <LandingNavbar onOpenAuth={onOpenAuth} />
-          </div>
+      {/* Navbar positioned over hero */}
+      <div className="editorial-hero-nav-slot">
+        <LandingNavbar onOpenAuth={onOpenAuth} />
+      </div>
 
-          {/* Mobile Dedicated Hero Image (Rendered only on Mobile per Section 12) */}
-          <div className="editorial-hero-mobile-image-wrap">
-            <img
-              src="/assets/parkspot-hero.jpg"
-              alt="ParkSpot parking facilities"
-              className="editorial-hero-mobile-img"
-              loading="eager"
-            />
-          </div>
-
-          {/* 5. Hero Editorial Copy ON TOP OF / WITHIN the Hero Image */}
-          <div className="editorial-hero-content">
+      {/* Hero Content: Left-aligned, high contrast, editorial layout */}
+      <div className="editorial-hero-content-wrap">
+        <div className="editorial-hero-content">
+          {/* Eyebrow: PREMIUM MANAGED PARKING ─── */}
+          <div className="editorial-hero-eyebrow">
             <span className="editorial-hero-tag">PREMIUM MANAGED PARKING</span>
+            <span className="editorial-hero-eyebrow-line" aria-hidden="true" />
+          </div>
 
-            <h1 className="editorial-hero-headline">
-              Parking,<br className="hero-heading-break" />without the search.
-            </h1>
+          {/* Headline: Parking, without the search. */}
+          <h1 className="editorial-hero-headline">
+            Parking,<br />
+            without the<br />
+            <span className="hero-headline-accent">search.</span>
+          </h1>
 
-            <p className="editorial-hero-subhead">
-              Find a parking facility, choose your exact space,<br className="hero-subhead-break" />
-              and reserve it before you arrive.
-            </p>
+          {/* Supporting Text */}
+          <p className="editorial-hero-subhead">
+            Find a parking facility, choose your space,<br className="hero-subhead-break" />
+            and reserve it before you arrive.
+          </p>
 
-            <div className="editorial-hero-buttons">
-              <button
-                type="button"
-                className="editorial-btn-find-parking"
-                onClick={() => navigate('/driver')}
-              >
-                <span>Find Parking</span>
-                <ArrowRight size={17} />
-              </button>
-              <button
-                type="button"
-                className="editorial-btn-for-businesses"
-                onClick={scrollToBusinesses}
-              >
-                For Businesses
-              </button>
-            </div>
+          {/* CTA Buttons */}
+          <div className="editorial-hero-buttons">
+            <button
+              type="button"
+              className="editorial-btn-find-parking"
+              onClick={() => navigate('/driver')}
+            >
+              <span>Find Parking</span>
+              <ArrowRight size={17} />
+            </button>
+            <button
+              type="button"
+              className="editorial-btn-for-businesses"
+              onClick={scrollToBusinesses}
+            >
+              For Businesses
+            </button>
           </div>
         </div>
       </div>

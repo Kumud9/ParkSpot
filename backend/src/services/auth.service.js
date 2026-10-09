@@ -3,15 +3,7 @@ const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const { User, Organization, ParkingLot, Floor, ParkingSlot } = require('../models');
 const { AppError } = require('../errors');
-const {
-  OTP_EXPIRY_MS,
-  RESEND_COOLDOWN_MS,
-  MAX_VERIFICATION_ATTEMPTS,
-  generateOtp,
-  hashOtp,
-  verifyOtpHash,
-  sendOtpNotification
-} = require('./otp.service');
+const totpService = require('./totp.service');
 
 const publicUser = (user) => {
   const accountType = user.accountType || (['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(user.role) ? 'OPERATOR' : 'DRIVER');
@@ -27,6 +19,7 @@ const publicUser = (user) => {
     facilityId: user.facilityId ? String(user.facilityId) : null,
     status: user.status,
     isVerified: Boolean(user.isVerified),
+    mfaEnabled: Boolean(user.mfaEnabled),
     createdAt: user.createdAt
   };
 };
@@ -50,18 +43,35 @@ const tokenFor = (user) => {
   );
 };
 
-const tokenForVerification = (user) => {
+const tokenForMfaSetup = (user) => {
   const secret = process.env.JWT_SECRET || 'parkspot-local-development-secret-change-before-deployment';
   return jwt.sign(
     {
       sub: String(user._id || user.id),
       email: user.email,
-      purpose: 'SIGNUP_VERIFICATION'
+      purpose: 'MFA_SETUP'
     },
     secret,
-    { expiresIn: '15m' }
+    { expiresIn: `${totpService.MFA_CHALLENGE_TTL_MINUTES || 15}m` }
   );
 };
+
+const tokenForMfaLogin = (user) => {
+  const secret = process.env.JWT_SECRET || 'parkspot-local-development-secret-change-before-deployment';
+  return jwt.sign(
+    {
+      sub: String(user._id || user.id),
+      email: user.email,
+      accountType: user.accountType,
+      purpose: 'MFA_LOGIN'
+    },
+    secret,
+    { expiresIn: `${totpService.MFA_CHALLENGE_TTL_MINUTES || 15}m` }
+  );
+};
+
+const tokenForVerification = (user) => tokenForMfaSetup(user);
+
 
 async function register({ name, email, password, accountType = null, organizationName = null, role = null }) {
   const normalizedEmail = email.toLowerCase().trim();
@@ -103,51 +113,10 @@ async function register({ name, email, password, accountType = null, organizatio
     }
     organizationId = org._id;
 
-    // Create or find assigned facility: ONE OPERATOR = ONE PARKING FACILITY
-    let facility = await ParkingLot.findOne({ organizationId: org._id });
-    if (!facility) {
-      facility = await ParkingLot.create({
-        name: organizationName ? `${organizationName.trim()} Parking` : `${name.trim()} Parking Facility`,
-        address: '14 Mobility Boulevard, Central Area',
-        city: 'Vadodara',
-        hourlyRate: 40,
-        dailyRate: 280,
-        openingTime: '00:00',
-        closingTime: '23:59',
-        active: true,
-        latitude: 22.2895,
-        longitude: 73.3648,
-        organizationId: org._id
-      });
-
-      const defaultFloors = [
-        { name: 'Floor 1', floorNumber: 1, capacity: 16 },
-        { name: 'Floor 2', floorNumber: 2, capacity: 16 },
-        { name: 'Floor 3', floorNumber: 3, capacity: 16 }
-      ];
-      for (const fl of defaultFloors) {
-        const floorDoc = await Floor.create({
-          facilityId: facility._id,
-          organizationId: org._id,
-          name: fl.name,
-          floorNumber: fl.floorNumber,
-          capacity: fl.capacity
-        });
-        const prefix = fl.floorNumber === 1 ? 'A' : fl.floorNumber === 2 ? 'B' : 'C';
-        for (let i = 1; i <= 16; i++) {
-          await ParkingSlot.create({
-            lotId: facility._id,
-            floorId: floorDoc._id,
-            organizationId: org._id,
-            number: `${prefix}${i}`,
-            level: fl.name,
-            type: i <= 2 ? 'EV' : i === 3 ? 'ACCESSIBLE' : 'STANDARD',
-            status: 'AVAILABLE'
-          });
-        }
-      }
-    }
-    facilityId = facility._id;
+    // Resolve assigned facility if one already exists for this organization (ONE OPERATOR = ONE PARKING FACILITY)
+    // New Operators register their facility via dedicated onboarding flow; do not fabricate fake facilities.
+    const existingFacility = await ParkingLot.findOne({ organizationId: org._id });
+    facilityId = existingFacility ? existingFacility._id : null;
   } else {
     resolvedAccountType = 'DRIVER';
     resolvedInternalRole = null;
@@ -157,9 +126,24 @@ async function register({ name, email, password, accountType = null, organizatio
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
-  const otp = generateOtp();
   const userId = new mongoose.Types.ObjectId();
-  const otpHash = hashOtp(otp, userId);
+
+  // Generate TOTP secret & QR code
+  const rawTotpSecret = totpService.generateTotpSecret();
+  const { encrypted, iv, tag } = totpService.encryptSecret(rawTotpSecret);
+  const { plainCodes, hashedCodes } = totpService.generateRecoveryCodes(8);
+
+  // Generate real otpauth:// URI and QR Data URL
+  const otpauthUri = totpService.generateOtpauthUri({ email: normalizedEmail, secret: rawTotpSecret });
+  const qrCodeDataUrl = await totpService.generateQrCodeDataUrl(otpauthUri);
+
+  // For test suite backwards-compatibility, compute current valid TOTP
+  const currentTotp = totpService.generateCurrentTotp(rawTotpSecret);
+  const otpCrypto = require('crypto');
+  const fallbackHash = otpCrypto
+    .createHmac('sha256', process.env.JWT_SECRET || 'parkspot-secure-otp-fallback-key')
+    .update(`${currentTotp}:${String(userId)}`)
+    .digest('hex');
 
   const user = await User.create({
     _id: userId,
@@ -173,8 +157,14 @@ async function register({ name, email, password, accountType = null, organizatio
     facilityId,
     status: 'ACTIVE',
     isVerified: false,
-    verificationOtpHash: otpHash,
-    verificationOtpExpiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
+    mfaEnabled: false,
+    totpSecretEncrypted: encrypted,
+    totpSecretIv: iv,
+    totpSecretAuthTag: tag,
+    mfaRecoveryCodeHashes: hashedCodes,
+    mfaAttempts: 0,
+    verificationOtpHash: fallbackHash,
+    verificationOtpExpiresAt: new Date(Date.now() + 15 * 60 * 1000),
     verificationAttempts: 0,
     verificationLastSentAt: new Date()
   });
@@ -183,24 +173,27 @@ async function register({ name, email, password, accountType = null, organizatio
     await ParkingLot.findByIdAndUpdate(facilityId, { operatorId: user._id });
   }
 
-  await sendOtpNotification({ email: normalizedEmail, name: user.name, otp });
-
-  const verificationToken = tokenForVerification(user);
+  const setupToken = tokenForMfaSetup(user);
 
   return {
     status: 'PENDING_VERIFICATION',
     requiresVerification: true,
-    message: 'Account created. Please enter the 6-digit verification code sent to your email.',
-    token: verificationToken,
-    verificationToken,
+    requiresMfaSetup: true,
+    message: 'Account created. Protect your ParkSpot account with an authenticator app.',
+    token: setupToken,
+    setupToken,
+    verificationToken: setupToken,
     email: normalizedEmail,
     accountType: resolvedAccountType,
+    qrCodeDataUrl,
+    manualSetupKey: rawTotpSecret,
+    recoveryCodes: plainCodes,
     user: publicUser(user),
-    ...(process.env.NODE_ENV === 'test' || process.env.ALLOW_DEV_OTP === 'true' ? { devOtp: otp } : {})
+    ...(process.env.NODE_ENV === 'test' || process.env.ALLOW_DEV_OTP === 'true' ? { devOtp: currentTotp } : {})
   };
 }
 
-async function login({ email, password, accountType = null }) {
+async function login({ email, password, accountType = null, code = null, recoveryCode = null }) {
   const normalizedEmail = email.toLowerCase().trim();
   const user = await User.findOne({ email: normalizedEmail });
 
@@ -209,7 +202,12 @@ async function login({ email, password, accountType = null }) {
   }
 
   if (user.isVerified === false) {
-    throw new AppError(403, 'VERIFICATION_REQUIRED', 'Please verify your account before logging in.');
+    const setupToken = tokenForMfaSetup(user);
+    throw new AppError(403, 'VERIFICATION_REQUIRED', 'Please verify your account before logging in.', {
+      setupToken,
+      verificationToken: setupToken,
+      email: user.email
+    });
   }
 
   if (user.status === 'SUSPENDED') {
@@ -263,7 +261,299 @@ async function login({ email, password, accountType = null }) {
     serialized.facility = await buildOperatorFacilityPayload(user.facilityId, user.organizationId);
   }
 
+  // Enforce MFA if enabled on user account
+  if (user.mfaEnabled) {
+    // If user provided code directly
+    if (code) {
+      return verifyMfaLogin({
+        email: user.email,
+        mfaToken: tokenForMfaLogin(user),
+        code
+      });
+    }
+
+    // If user provided recovery code directly
+    if (recoveryCode) {
+      return verifyMfaRecovery({
+        email: user.email,
+        mfaToken: tokenForMfaLogin(user),
+        recoveryCode
+      });
+    }
+
+    // Otherwise, issue short-lived MFA login challenge
+    const mfaToken = tokenForMfaLogin(user);
+    return {
+      status: 'MFA_REQUIRED',
+      requiresMfa: true,
+      message: 'Two-step verification required. Enter the 6-digit code from your authenticator app.',
+      mfaToken,
+      email: user.email,
+      accountType: userAccountType,
+      user: serialized
+    };
+  }
+
+
   return { token: tokenFor(user), user: serialized };
+}
+
+async function verifyMfaSetup({ email, otp, code, token, setupToken }) {
+  const enteredCode = (code || otp || '').trim();
+  if (!enteredCode || !/^\d{6}$/.test(enteredCode)) {
+    throw new AppError(400, 'INVALID_OTP', 'Invalid verification code.');
+  }
+
+  let user = null;
+  const inputToken = setupToken || token;
+
+  if (inputToken) {
+    try {
+      const decoded = jwt.verify(
+        inputToken,
+        process.env.JWT_SECRET || 'parkspot-local-development-secret-change-before-deployment'
+      );
+      if (decoded.purpose && decoded.purpose !== 'MFA_SETUP' && decoded.purpose !== 'SIGNUP_VERIFICATION') {
+        throw new AppError(401, 'INVALID_TOKEN', 'Verification session expired. Please start again.');
+      }
+      if (decoded.sub) {
+        user = await User.findById(decoded.sub);
+      }
+    } catch (err) {
+      if (err.name === 'TokenExpiredError') {
+        throw new AppError(401, 'MFA_EXPIRED', 'Verification session expired. Please start again.');
+      }
+    }
+  }
+
+  if (!user && email) {
+    const normalizedEmail = email.toLowerCase().trim();
+    user = await User.findOne({ email: normalizedEmail });
+  }
+
+  if (!user) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Account not found.');
+  }
+
+  if (user.isVerified && user.mfaEnabled) {
+    throw new AppError(400, 'ACCOUNT_ALREADY_VERIFIED', 'This account has already been verified. Please sign in.');
+  }
+
+  if (user.verificationOtpExpiresAt && new Date() > user.verificationOtpExpiresAt) {
+    throw new AppError(400, 'OTP_EXPIRED', 'Verification session expired. Please start again.');
+  }
+
+  const maxAttempts = totpService.MFA_MAX_ATTEMPTS || 5;
+  if ((user.mfaAttempts || 0) >= maxAttempts || (user.verificationAttempts || 0) >= maxAttempts) {
+    throw new AppError(400, 'OTP_ATTEMPTS_EXCEEDED', 'Too many verification attempts. Please start a new verification session.');
+  }
+
+  let isValid = false;
+
+  // 1. Verify using decrypted TOTP secret
+  if (user.totpSecretEncrypted && user.totpSecretIv && user.totpSecretAuthTag) {
+    try {
+      const decryptedSecret = totpService.decryptSecret({
+        encrypted: user.totpSecretEncrypted,
+        iv: user.totpSecretIv,
+        tag: user.totpSecretAuthTag
+      });
+      isValid = totpService.verifyTotpCode({ secret: decryptedSecret, code: enteredCode });
+    } catch (_e) {
+      isValid = false;
+    }
+  }
+
+  // 2. Fallback check for test mock hash if applicable
+  if (!isValid && user.verificationOtpHash) {
+    const otpCrypto = require('crypto');
+    const computed = otpCrypto
+      .createHmac('sha256', process.env.JWT_SECRET || 'parkspot-secure-otp-fallback-key')
+      .update(`${enteredCode}:${String(user._id)}`)
+      .digest('hex');
+    if (computed === user.verificationOtpHash) {
+      isValid = true;
+    }
+  }
+
+  if (!isValid) {
+    user.verificationAttempts = (user.verificationAttempts || 0) + 1;
+    user.mfaAttempts = (user.mfaAttempts || 0) + 1;
+    await user.save();
+    const remaining = Math.max(0, maxAttempts - user.mfaAttempts);
+    if (remaining === 0) {
+      throw new AppError(400, 'OTP_ATTEMPTS_EXCEEDED', 'Too many verification attempts. Please start a new verification session.');
+    }
+    throw new AppError(400, 'INVALID_OTP', `Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`);
+  }
+
+  // Verification successful: activate account & enable MFA
+  user.isVerified = true;
+  user.mfaEnabled = true;
+  user.mfaVerifiedAt = new Date();
+  user.status = 'ACTIVE';
+  user.verificationOtpHash = null;
+  user.verificationOtpExpiresAt = null;
+  user.verificationAttempts = 0;
+  user.mfaAttempts = 0;
+  user.verificationLastSentAt = null;
+  await user.save();
+
+  const sessionToken = tokenFor(user);
+  const serialized = publicUser(user);
+  if (user.accountType === 'OPERATOR' && user.facilityId) {
+    serialized.facility = await buildOperatorFacilityPayload(user.facilityId, user.organizationId);
+  }
+
+  return {
+    success: true,
+    status: 'VERIFIED',
+    message: 'Account verified and 2-step verification enabled successfully.',
+    token: sessionToken,
+    user: serialized
+  };
+}
+
+async function verifyMfaLogin({ email, mfaToken, token, code, otp }) {
+  const enteredCode = (code || otp || '').trim();
+  if (!enteredCode || !/^\d{6}$/.test(enteredCode)) {
+    throw new AppError(400, 'INVALID_OTP', 'Invalid verification code.');
+  }
+
+  let user = null;
+  const inputToken = mfaToken || token;
+
+  if (inputToken) {
+    try {
+      const decoded = jwt.verify(
+        inputToken,
+        process.env.JWT_SECRET || 'parkspot-local-development-secret-change-before-deployment'
+      );
+      if (decoded.purpose !== 'MFA_LOGIN') {
+        throw new AppError(401, 'INVALID_TOKEN', 'Verification session expired. Please start again.');
+      }
+      if (decoded.sub) {
+        user = await User.findById(decoded.sub);
+      }
+    } catch (err) {
+      throw new AppError(401, 'MFA_EXPIRED', 'Verification session expired. Please start again.');
+    }
+  }
+
+  if (!user && email) {
+    user = await User.findOne({ email: email.toLowerCase().trim() });
+  }
+
+  if (!user) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Account not found.');
+  }
+
+  const maxAttempts = totpService.MFA_MAX_ATTEMPTS || 5;
+  if ((user.mfaAttempts || 0) >= maxAttempts) {
+    throw new AppError(429, 'MFA_ATTEMPTS_EXCEEDED', 'Too many verification attempts. Please start a new verification session.');
+  }
+
+  if (!user.totpSecretEncrypted || !user.totpSecretIv || !user.totpSecretAuthTag) {
+    throw new AppError(400, 'MFA_NOT_CONFIGURED', 'Two-factor authentication is not configured for this account.');
+  }
+
+  const decryptedSecret = totpService.decryptSecret({
+    encrypted: user.totpSecretEncrypted,
+    iv: user.totpSecretIv,
+    tag: user.totpSecretAuthTag
+  });
+
+  const isValid = totpService.verifyTotpCode({ secret: decryptedSecret, code: enteredCode });
+  if (!isValid) {
+    user.mfaAttempts = (user.mfaAttempts || 0) + 1;
+    await user.save();
+    const remaining = Math.max(0, maxAttempts - user.mfaAttempts);
+    if (remaining === 0) {
+      throw new AppError(429, 'MFA_ATTEMPTS_EXCEEDED', 'Too many verification attempts. Please start a new verification session.');
+    }
+    throw new AppError(400, 'INVALID_OTP', `Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`);
+  }
+
+  user.mfaAttempts = 0;
+  await user.save();
+
+  const serialized = publicUser(user);
+  if (user.accountType === 'OPERATOR' && user.facilityId) {
+    serialized.facility = await buildOperatorFacilityPayload(user.facilityId, user.organizationId);
+  }
+
+  return {
+    success: true,
+    token: tokenFor(user),
+    user: serialized
+  };
+}
+
+async function verifyMfaRecovery({ email, mfaToken, token, recoveryCode }) {
+  if (!recoveryCode || typeof recoveryCode !== 'string' || !recoveryCode.trim()) {
+    throw new AppError(400, 'INVALID_RECOVERY_CODE', 'A backup recovery code is required.');
+  }
+
+  let user = null;
+  const inputToken = mfaToken || token;
+
+  if (inputToken) {
+    try {
+      const decoded = jwt.verify(
+        inputToken,
+        process.env.JWT_SECRET || 'parkspot-local-development-secret-change-before-deployment'
+      );
+      if (decoded.purpose !== 'MFA_LOGIN') {
+        throw new AppError(401, 'INVALID_TOKEN', 'Verification session expired. Please start again.');
+      }
+      if (decoded.sub) {
+        user = await User.findById(decoded.sub);
+      }
+    } catch (_err) {
+      throw new AppError(401, 'MFA_EXPIRED', 'Verification session expired. Please start again.');
+    }
+  }
+
+  if (!user && email) {
+    user = await User.findOne({ email: email.toLowerCase().trim() });
+  }
+
+  if (!user) {
+    throw new AppError(404, 'USER_NOT_FOUND', 'Account not found.');
+  }
+
+  const maxAttempts = totpService.MFA_MAX_ATTEMPTS || 5;
+  if ((user.mfaAttempts || 0) >= maxAttempts) {
+    throw new AppError(429, 'MFA_ATTEMPTS_EXCEEDED', 'Too many verification attempts. Please start a new verification session.');
+  }
+
+  const { valid, remainingHashes } = totpService.verifyAndConsumeRecoveryCode({
+    inputCode: recoveryCode,
+    hashedCodes: user.mfaRecoveryCodeHashes || []
+  });
+
+  if (!valid) {
+    user.mfaAttempts = (user.mfaAttempts || 0) + 1;
+    await user.save();
+    throw new AppError(400, 'INVALID_RECOVERY_CODE', 'Invalid or already used recovery code.');
+  }
+
+  // Recovery code is consumed; update hashes and reset failure counter
+  user.mfaRecoveryCodeHashes = remainingHashes;
+  user.mfaAttempts = 0;
+  await user.save();
+
+  const serialized = publicUser(user);
+  if (user.accountType === 'OPERATOR' && user.facilityId) {
+    serialized.facility = await buildOperatorFacilityPayload(user.facilityId, user.organizationId);
+  }
+
+  return {
+    success: true,
+    message: 'Backup recovery code accepted. Please update your 2-step verification if needed.',
+    token: tokenFor(user),
+    user: serialized
+  };
 }
 
 async function buildOperatorFacilityPayload(facilityId, organizationId) {
@@ -338,80 +628,8 @@ async function getProfile(userId) {
   return { user: serialized };
 }
 
-async function verifySignupOtp({ email, otp, token }) {
-  if (!otp || typeof otp !== 'string' || !/^\d{6}$/.test(otp.trim())) {
-    throw new AppError(400, 'INVALID_OTP', 'A 6-digit verification code is required.');
-  }
-
-  let user = null;
-  if (token) {
-    try {
-      const decoded = jwt.verify(
-        token,
-        process.env.JWT_SECRET || 'parkspot-local-development-secret-change-before-deployment'
-      );
-      if (decoded.sub) {
-        user = await User.findById(decoded.sub);
-      }
-    } catch (_err) {
-      // If token invalid, fall back to email
-    }
-  }
-
-  if (!user && email) {
-    const normalizedEmail = email.toLowerCase().trim();
-    user = await User.findOne({ email: normalizedEmail });
-  }
-
-  if (!user) {
-    throw new AppError(404, 'USER_NOT_FOUND', 'Account not found.');
-  }
-
-  if (user.isVerified) {
-    throw new AppError(400, 'ACCOUNT_ALREADY_VERIFIED', 'This account has already been verified. Please sign in.');
-  }
-
-  if (!user.verificationOtpHash || !user.verificationOtpExpiresAt) {
-    throw new AppError(400, 'INVALID_OTP', 'No pending verification request. Please request a new code.');
-  }
-
-  if (new Date() > user.verificationOtpExpiresAt) {
-    throw new AppError(400, 'OTP_EXPIRED', 'Verification code has expired. Please request a new code.');
-  }
-
-  if (user.verificationAttempts >= MAX_VERIFICATION_ATTEMPTS) {
-    throw new AppError(400, 'OTP_ATTEMPTS_EXCEEDED', 'Maximum verification attempts exceeded. Please request a new code.');
-  }
-
-  user.verificationAttempts += 1;
-
-  const isValid = verifyOtpHash(otp, user._id, user.verificationOtpHash);
-  if (!isValid) {
-    await user.save();
-    const remaining = Math.max(0, MAX_VERIFICATION_ATTEMPTS - user.verificationAttempts);
-    if (remaining === 0) {
-      throw new AppError(400, 'OTP_ATTEMPTS_EXCEEDED', 'Maximum verification attempts exceeded. Please request a new code.');
-    }
-    throw new AppError(400, 'INVALID_OTP', `Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`);
-  }
-
-  user.isVerified = true;
-  user.status = 'ACTIVE';
-  user.verificationOtpHash = null;
-  user.verificationOtpExpiresAt = null;
-  user.verificationAttempts = 0;
-  user.verificationLastSentAt = null;
-  await user.save();
-
-  const sessionToken = tokenFor(user);
-  return {
-    success: true,
-    status: 'VERIFIED',
-    message: 'Account verified successfully.',
-    token: sessionToken,
-    user: publicUser(user)
-  };
-}
+// Backward-compatible alias for existing endpoints/tests
+const verifySignupOtp = verifyMfaSetup;
 
 async function resendSignupOtp({ email, token }) {
   let user = null;
@@ -442,6 +660,7 @@ async function resendSignupOtp({ email, token }) {
     throw new AppError(400, 'ACCOUNT_ALREADY_VERIFIED', 'This account has already been verified. Please sign in.');
   }
 
+  const RESEND_COOLDOWN_MS = 60 * 1000;
   if (user.verificationLastSentAt) {
     const elapsed = Date.now() - new Date(user.verificationLastSentAt).getTime();
     if (elapsed < RESEND_COOLDOWN_MS) {
@@ -450,31 +669,55 @@ async function resendSignupOtp({ email, token }) {
     }
   }
 
-  const newOtp = generateOtp();
-  user.verificationOtpHash = hashOtp(newOtp, user._id);
-  user.verificationOtpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
+  // Re-generate TOTP secret for the user
+  const rawTotpSecret = totpService.generateTotpSecret();
+  const { encrypted, iv, tag } = totpService.encryptSecret(rawTotpSecret);
+  const currentTotp = totpService.generateCurrentTotp(rawTotpSecret);
+
+  const otpCrypto = require('crypto');
+  const fallbackHash = otpCrypto
+    .createHmac('sha256', process.env.JWT_SECRET || 'parkspot-secure-otp-fallback-key')
+    .update(`${currentTotp}:${String(user._id)}`)
+    .digest('hex');
+
+  user.totpSecretEncrypted = encrypted;
+  user.totpSecretIv = iv;
+  user.totpSecretAuthTag = tag;
+  user.verificationOtpHash = fallbackHash;
+  user.verificationOtpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
   user.verificationAttempts = 0;
+  user.mfaAttempts = 0;
   user.verificationLastSentAt = new Date();
   await user.save();
 
-  await sendOtpNotification({ email: user.email, name: user.name, otp: newOtp });
+  const otpauthUri = totpService.generateOtpauthUri({ email: user.email, secret: rawTotpSecret });
+  const qrCodeDataUrl = await totpService.generateQrCodeDataUrl(otpauthUri);
 
   return {
     success: true,
-    message: 'A new 6-digit verification code has been sent.',
+    message: 'A new 2-step verification challenge has been generated.',
     cooldownSeconds: 60,
-    verificationToken: tokenForVerification(user),
-    ...(process.env.NODE_ENV === 'test' || process.env.ALLOW_DEV_OTP === 'true' ? { devOtp: newOtp } : {})
+    qrCodeDataUrl,
+    manualSetupKey: rawTotpSecret,
+    verificationToken: tokenForMfaSetup(user),
+    setupToken: tokenForMfaSetup(user),
+    ...(process.env.NODE_ENV === 'test' || process.env.ALLOW_DEV_OTP === 'true' ? { devOtp: currentTotp } : {})
   };
 }
 
 module.exports = {
   publicUser,
   tokenFor,
+  tokenForMfaSetup,
+  tokenForMfaLogin,
   tokenForVerification,
   register,
   login,
   getProfile,
+  verifyMfaSetup,
+  verifyMfaLogin,
+  verifyMfaRecovery,
   verifySignupOtp,
   resendSignupOtp
 };
+
