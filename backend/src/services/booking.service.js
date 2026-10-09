@@ -119,6 +119,11 @@ async function createBooking({
         throw new AppError(404, 'SLOT_NOT_FOUND', 'An active parking slot was not found.');
       }
 
+      // Validate spot-facility association
+      if (String(slot.lotId) !== String(lot._id)) {
+        throw new AppError(400, 'INVALID_SPOT_FACILITY_RELATION', 'Selected spot does not belong to the selected facility.');
+      }
+
       // Check for overlapping confirmed booking or active payment hold
       const holdThreshold = new Date(Date.now() - 15 * 60 * 1000);
       const conflictQuery = Booking.exists({
@@ -137,17 +142,25 @@ async function createBooking({
         throw new AppError(409, 'SPOT_ALREADY_BOOKED', 'This parking spot was just booked by another driver.');
       }
 
+      // Ensure valid positive facility rates
+      const hourlyRate = Number(lot.hourlyRate) > 0 ? Number(lot.hourlyRate) : 50;
+      const dailyRate = Number(lot.dailyRate) > 0 ? Number(lot.dailyRate) : Math.round(hourlyRate * 6);
+
       // Fetch pricing rules for facility
       const rules = await PricingRule.find({ facilityId: lot._id, isActive: true }).lean();
       const price = calculatePrice({
         start,
         end,
         type,
-        hourlyRate: lot.hourlyRate,
-        dailyRate: lot.dailyRate,
-        spotType: slot.type,
+        hourlyRate,
+        dailyRate,
+        spotType: slot.type || 'STANDARD',
         rules
       });
+
+      if (!Number.isFinite(price.amount) || price.amount <= 0) {
+        throw new AppError(400, 'INVALID_PAYABLE_AMOUNT', 'Payable booking amount must be a valid positive number.');
+      }
 
       const bookingDocs = await Booking.create(
         [

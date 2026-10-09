@@ -87,6 +87,32 @@ function calculatePrice({ start, end, type, hourlyRate, dailyRate, spotType = 'S
   let effectiveHourly = Number(hourlyRate);
   let effectiveDaily = Number(dailyRate);
 
+  // If initial rates are invalid/non-positive, resolve from active rules if available
+  if (!Number.isFinite(effectiveHourly) || effectiveHourly <= 0) {
+    if (Array.isArray(rules) && rules.length > 0) {
+      const activeRule = rules.find((r) => r.isActive && r.pricePerHour > 0);
+      if (activeRule) {
+        effectiveHourly = activeRule.pricePerHour;
+      }
+    }
+  }
+  if (!Number.isFinite(effectiveDaily) || effectiveDaily <= 0) {
+    if (Array.isArray(rules) && rules.length > 0) {
+      const activeRule = rules.find((r) => r.isActive && r.pricePerDay > 0);
+      if (activeRule) {
+        effectiveDaily = activeRule.pricePerDay;
+      }
+    }
+  }
+
+  // Fallback to standard business default rates if still unconfigured
+  if (!Number.isFinite(effectiveHourly) || effectiveHourly <= 0) {
+    effectiveHourly = Number.isFinite(effectiveDaily) && effectiveDaily > 0 ? Math.max(1, Math.round(effectiveDaily / 6)) : 50;
+  }
+  if (!Number.isFinite(effectiveDaily) || effectiveDaily <= 0) {
+    effectiveDaily = Math.max(1, Math.round(effectiveHourly * 6));
+  }
+
   if (Array.isArray(rules) && rules.length > 0) {
     const dayUTC = start.getUTCDay();
     const dayLocal = start.getDay();
@@ -116,13 +142,39 @@ function calculatePrice({ start, end, type, hourlyRate, dailyRate, spotType = 'S
       // Deterministically sort by specificity score descending
       matchingRules.sort((a, b) => getRuleSpecificityScore(b, spotType) - getRuleSpecificityScore(a, spotType));
       const bestRule = matchingRules[0];
-      effectiveHourly = bestRule.pricePerHour;
-      effectiveDaily = bestRule.pricePerDay;
+      if (Number.isFinite(bestRule.pricePerHour) && bestRule.pricePerHour > 0) {
+        effectiveHourly = bestRule.pricePerHour;
+      }
+      if (Number.isFinite(bestRule.pricePerDay) && bestRule.pricePerDay > 0) {
+        effectiveDaily = bestRule.pricePerDay;
+      }
     }
   }
 
   const rate = type === 'DAILY' ? effectiveDaily : effectiveHourly;
-  return { units, amount: Number((units * rate).toFixed(2)) };
+  const rawAmount = units * rate;
+  const amount = Number(rawAmount.toFixed(2));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new AppError(400, 'INVALID_PRICING', 'Unable to calculate a valid positive price.');
+  }
+  return { units, amount };
+}
+
+/**
+ * Authoritatively converts rupees to integer paise.
+ * Enforces positive finite values, standard rounding, and Razorpay's minimum INR amount of ₹1.00 (100 paise).
+ */
+function rupeesToPaise(rupeesAmount) {
+  const num = Number(rupeesAmount);
+  if (!Number.isFinite(num) || num <= 0 || isNaN(num)) {
+    throw new AppError(400, 'INVALID_PAYMENT_AMOUNT', 'Payable amount must be a valid positive number.');
+  }
+  const roundedRupees = Number(num.toFixed(2));
+  const paise = Math.round(roundedRupees * 100);
+  if (paise < 100) {
+    throw new AppError(400, 'AMOUNT_BELOW_MINIMUM', 'Order amount must be at least ₹1.00 (100 paise).');
+  }
+  return paise;
 }
 
 module.exports = {
@@ -130,5 +182,6 @@ module.exports = {
   parseTimeToMinutes,
   isWithinTimeWindow,
   getRuleSpecificityScore,
-  calculatePrice
+  calculatePrice,
+  rupeesToPaise
 };

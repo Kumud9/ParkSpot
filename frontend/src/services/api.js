@@ -134,8 +134,13 @@ async function request(endpoint, options = {}) {
     }
   }
 
+  const timeoutMs = options.timeoutMs || 25000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const res = await fetch(url, { ...options, headers });
+    const res = await fetch(url, { ...options, headers, signal: controller.signal });
+    clearTimeout(timeoutId);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (res.status === 401) {
@@ -161,6 +166,13 @@ async function request(endpoint, options = {}) {
     }
     return data;
   } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      const timeoutErr = new Error('Request timed out. The banking gateway or server took too long to respond.');
+      timeoutErr.status = 504;
+      timeoutErr.code = 'REQUEST_TIMEOUT';
+      throw timeoutErr;
+    }
     if (err.status !== 401 && !url.includes('/auth/me')) {
       console.warn(`[ParkSpot API] Request to ${url} failed:`, err.message);
     }
@@ -193,12 +205,15 @@ export function normalizeSpot(slot, defaultRate = 40) {
  * Normalizes backend facility into frontend format
  */
 export function normalizeFacility(lot) {
+  const validHourly = Number(lot.hourlyRate) > 0 ? Number(lot.hourlyRate) : (Number(lot.dailyRate) > 0 ? Math.max(1, Math.round(Number(lot.dailyRate) / 6)) : 50);
+  const validDaily = Number(lot.dailyRate) > 0 ? Number(lot.dailyRate) : Math.round(validHourly * 6);
+
   // Map spots if present in either slots or spots format
   const rawSpots = (lot.slots && Array.isArray(lot.slots) && lot.slots.length > 0)
     ? lot.slots
     : (Array.isArray(lot.spots) && lot.spots.length > 0 ? lot.spots : null);
 
-  const spots = rawSpots ? rawSpots.map((s) => normalizeSpot(s, lot.hourlyRate)) : null;
+  const spots = rawSpots ? rawSpots.map((s) => normalizeSpot(s, validHourly)) : null;
 
   const totalSlots = spots ? spots.length : (lot.totalSlots ?? lot.capacity ?? 48);
   const availableSlots = spots
@@ -237,8 +252,8 @@ export function normalizeFacility(lot) {
     openingHours: lot.openingTime === '00:00' && lot.closingTime === '23:59' ? '24 Hours' : `${lot.openingTime || '07:00'} – ${lot.closingTime || '22:00'}`,
     rating: lot.rating || 4.8,
     reviewsCount: lot.reviewsCount || 128,
-    hourlyRate: lot.hourlyRate || 20,
-    dailyRate: lot.dailyRate || 120,
+    hourlyRate: validHourly,
+    dailyRate: validDaily,
     totalSpots: totalSlots,
     totalSlots: totalSlots,
     availableSlots: availableSlots,

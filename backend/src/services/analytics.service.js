@@ -47,9 +47,14 @@ async function verifyFacilityAccess(facilityId, organizationId) {
 }
 
 // 1. Dashboard Summary
-async function getDashboardSummary({ organizationId, startDate, endDate }) {
+async function getDashboardSummary({ organizationId, facilityId = null, startDate, endDate }) {
   const orgId = toObjectId(organizationId);
+  const facId = toObjectId(facilityId);
   const { start, end, durationHours } = parseAnalyticsDateRange(startDate, endDate);
+
+  const slotMatch = { organizationId: orgId, ...(facId ? { lotId: facId } : {}) };
+  const bookingMatch = { organizationId: orgId, ...(facId ? { lotId: facId } : {}), createdAt: { $gte: start, $lte: end } };
+  const bookingTimeMatch = { organizationId: orgId, ...(facId ? { lotId: facId } : {}), status: { $in: ['CONFIRMED', 'COMPLETED'] }, startTime: { $gte: start, $lte: end } };
 
   const [facilitiesCount, slotAgg, bookingAgg, paymentAgg, peakHourAgg, topFacilityAgg] = await Promise.all([
     // Facilities count
@@ -57,7 +62,7 @@ async function getDashboardSummary({ organizationId, startDate, endDate }) {
 
     // Slot operational state
     ParkingSlot.aggregate([
-      { $match: { organizationId: orgId } },
+      { $match: slotMatch },
       {
         $group: {
           _id: null,
@@ -76,12 +81,7 @@ async function getDashboardSummary({ organizationId, startDate, endDate }) {
 
     // Booking totals & utilization in period
     Booking.aggregate([
-      {
-        $match: {
-          organizationId: orgId,
-          createdAt: { $gte: start, $lte: end }
-        }
-      },
+      { $match: bookingMatch },
       {
         $group: {
           _id: null,
@@ -104,6 +104,11 @@ async function getDashboardSummary({ organizationId, startDate, endDate }) {
           createdAt: { $gte: start, $lte: end }
         }
       },
+      ...(facId ? [
+        { $lookup: { from: 'bookings', localField: 'bookingId', foreignField: '_id', as: 'b' } },
+        { $unwind: '$b' },
+        { $match: { 'b.lotId': facId } }
+      ] : []),
       {
         $group: {
           _id: null,
@@ -116,13 +121,7 @@ async function getDashboardSummary({ organizationId, startDate, endDate }) {
 
     // Peak booking hour
     Booking.aggregate([
-      {
-        $match: {
-          organizationId: orgId,
-          status: { $in: ['CONFIRMED', 'COMPLETED'] },
-          startTime: { $gte: start, $lte: end }
-        }
-      },
+      { $match: bookingTimeMatch },
       {
         $group: {
           _id: { $hour: '$startTime' },
@@ -137,9 +136,8 @@ async function getDashboardSummary({ organizationId, startDate, endDate }) {
     Booking.aggregate([
       {
         $match: {
-          organizationId: orgId,
-          status: { $in: ['CONFIRMED', 'COMPLETED'] },
-          createdAt: { $gte: start, $lte: end }
+          ...bookingMatch,
+          status: { $in: ['CONFIRMED', 'COMPLETED'] }
         }
       },
       {
@@ -193,6 +191,7 @@ async function getDashboardSummary({ organizationId, startDate, endDate }) {
     {
       $match: {
         organizationId: orgId,
+        ...(facId ? { lotId: facId } : {}),
         status: { $in: ['CONFIRMED', 'COMPLETED'] },
         startTime: { $lt: end },
         endTime: { $gt: start }

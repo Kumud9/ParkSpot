@@ -99,8 +99,8 @@ const facilitySchema = new Schema({
   city: { type: String, required: true, trim: true, index: true },
   postalCode: { type: String, trim: true, default: null },
   description: { type: String, default: null },
-  hourlyRate: { type: Number, required: true, min: 0 },
-  dailyRate: { type: Number, required: true, min: 0 },
+  hourlyRate: { type: Number, required: true, min: 1, default: 50 },
+  dailyRate: { type: Number, required: true, min: 1, default: 300 },
   openingTime: { type: String, default: '00:00' },
   closingTime: { type: String, default: '23:59' },
   active: { type: Boolean, default: true, index: true },
@@ -116,6 +116,16 @@ const facilitySchema = new Schema({
     }
   }
 }, { timestamps: true, collection: 'parkinglots' });
+
+facilitySchema.pre('validate', function(next) {
+  if (typeof this.hourlyRate !== 'number' || isNaN(this.hourlyRate) || this.hourlyRate <= 0) {
+    this.hourlyRate = typeof this.dailyRate === 'number' && this.dailyRate > 0 ? Math.max(1, Math.round(this.dailyRate / 6)) : 50;
+  }
+  if (typeof this.dailyRate !== 'number' || isNaN(this.dailyRate) || this.dailyRate <= 0) {
+    this.dailyRate = Math.max(1, Math.round((this.hourlyRate || 50) * 6));
+  }
+  next();
+});
 
 facilitySchema.pre('save', function(next) {
   if (typeof this.latitude === 'number' && typeof this.longitude === 'number') {

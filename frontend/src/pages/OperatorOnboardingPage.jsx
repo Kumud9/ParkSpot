@@ -411,8 +411,8 @@ export function OperatorOnboardingPage({ onOnboarded }) {
     city.trim().length >= 2 &&
     typeof latitude === 'number' && !isNaN(latitude) && latitude >= -90 && latitude <= 90 &&
     typeof longitude === 'number' && !isNaN(longitude) && longitude >= -180 && longitude <= 180 &&
-    hourlyRate >= 0 &&
-    dailyRate >= 0
+    Number(hourlyRate) > 0 &&
+    Number(dailyRate) > 0
   );
 
   // Validate step 2
@@ -629,7 +629,7 @@ export function OperatorOnboardingPage({ onOnboarded }) {
                       <input
                         id="hourlyRate"
                         type="number"
-                        min="0"
+                        min="1"
                         className="form-input"
                         value={hourlyRate}
                         onChange={(e) => setHourlyRate(e.target.value)}
@@ -641,7 +641,7 @@ export function OperatorOnboardingPage({ onOnboarded }) {
                       <input
                         id="dailyRate"
                         type="number"
-                        min="0"
+                        min="1"
                         className="form-input"
                         value={dailyRate}
                         onChange={(e) => setDailyRate(e.target.value)}

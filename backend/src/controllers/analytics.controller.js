@@ -2,26 +2,22 @@ const { z } = require('zod');
 const analyticsService = require('../services/analytics.service');
 
 const dateRangeSchema = z.object({
+  facilityId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional()
 });
 
 const utilizationQuerySchema = dateRangeSchema.extend({
-  facilityId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   floorId: z.string().regex(/^[a-f\d]{24}$/i).optional()
 });
 
 const occupancyTrendsSchema = dateRangeSchema.extend({
-  facilityId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   bucket: z.enum(['hourly', 'daily']).optional().default('hourly')
 });
 
-const facilityAnalyticsSchema = dateRangeSchema.extend({
-  facilityId: z.string().regex(/^[a-f\d]{24}$/i).optional()
-});
+const facilityAnalyticsSchema = dateRangeSchema.extend({});
 
 const spotPerformanceSchema = dateRangeSchema.extend({
-  facilityId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   floorId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20)
@@ -32,6 +28,7 @@ async function getSummary(req, res, next) {
     const query = dateRangeSchema.parse(req.query);
     const result = await analyticsService.getDashboardSummary({
       organizationId: req.user.organizationId,
+      facilityId: query.facilityId || (req.user?.role === 'OPERATOR' ? req.facilityId : null),
       startDate: query.startDate,
       endDate: query.endDate
     });

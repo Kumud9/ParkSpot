@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { ParkingLot, ParkingSlot, Booking } = require('../models');
+const { ParkingLot, ParkingSlot, Booking, PricingRule } = require('../models');
 const { AppError } = require('../errors');
 const { escapeRegex } = require('../utils/sanitize');
 const { logAction } = require('./audit.service');
@@ -95,6 +95,7 @@ async function getPublicFacilityById(id, window) {
       number: slot.number,
       level: slot.level,
       type: slot.type,
+      hourlyRate: lot.hourlyRate,
       status: derivedStatus,
       coordinates: slot.coordinates,
       available: isAvailable,
@@ -179,6 +180,47 @@ async function getTenantFacilityById(id, organizationId) {
   };
 }
 
+async function initializeDefaultPricingRules(facilityId, organizationId, hourlyRate, dailyRate, session = null) {
+  const baseHourly = Math.max(1, Number(hourlyRate) > 0 ? Number(hourlyRate) : 50);
+  const baseDaily = Math.max(1, Number(dailyRate) > 0 ? Number(dailyRate) : Math.round(baseHourly * 6));
+
+  const rulesData = [
+    {
+      facilityId,
+      organizationId: organizationId || null,
+      name: 'Base Facility Rate',
+      spotType: 'ALL',
+      daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+      startTime: '00:00',
+      endTime: '23:59',
+      pricePerHour: baseHourly,
+      pricePerDay: baseDaily,
+      isActive: true
+    },
+    {
+      facilityId,
+      organizationId: organizationId || null,
+      name: 'EV Supercharger Special',
+      spotType: 'EV',
+      daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+      startTime: '00:00',
+      endTime: '23:59',
+      pricePerHour: baseHourly + 25,
+      pricePerDay: baseDaily + 150,
+      isActive: true
+    }
+  ];
+
+  const opts = session ? { session } : {};
+  for (const rule of rulesData) {
+    await PricingRule.findOneAndUpdate(
+      { facilityId, name: rule.name },
+      rule,
+      { upsert: true, new: true, setDefaultsOnInsert: true, ...opts }
+    );
+  }
+}
+
 async function createTenantFacility(organizationId, data, userId = null, ipAddress = null) {
   if (!organizationId) {
     throw new AppError(403, 'TENANT_REQUIRED', 'An active organization context is required.');
@@ -195,11 +237,18 @@ async function createTenantFacility(organizationId, data, userId = null, ipAddre
     throw new AppError(409, 'FACILITY_ALREADY_EXISTS', 'An operator account can only register one parking facility.');
   }
 
+  const baseHourly = Math.max(1, Number(data.hourlyRate) > 0 ? Number(data.hourlyRate) : 50);
+  const baseDaily = Math.max(1, Number(data.dailyRate) > 0 ? Number(data.dailyRate) : Math.round(baseHourly * 6));
+
   const facility = await ParkingLot.create({
     ...data,
+    hourlyRate: baseHourly,
+    dailyRate: baseDaily,
     organizationId,
     operatorId: userId
   });
+
+  await initializeDefaultPricingRules(facility._id, organizationId, baseHourly, baseDaily);
 
   if (userId) {
     const { User } = require('../models');
@@ -299,8 +348,13 @@ async function onboardFacility({
   let createdFacility = null;
   try {
     const opts = useTransaction ? { session } : {};
+    const baseHourly = Math.max(1, Number(facilityData.hourlyRate) > 0 ? Number(facilityData.hourlyRate) : 50);
+    const baseDaily = Math.max(1, Number(facilityData.dailyRate) > 0 ? Number(facilityData.dailyRate) : Math.round(baseHourly * 6));
+
     const facilityPayload = {
       ...facilityData,
+      hourlyRate: baseHourly,
+      dailyRate: baseDaily,
       organizationId,
       operatorId: userId,
       active: true
@@ -316,6 +370,8 @@ async function onboardFacility({
 
     const [facility] = await ParkingLot.create([facilityPayload], opts);
     createdFacility = facility;
+
+    await initializeDefaultPricingRules(facility._id, organizationId, baseHourly, baseDaily, session);
 
     for (const fl of floorsData) {
       const [floorDoc] = await Floor.create([{

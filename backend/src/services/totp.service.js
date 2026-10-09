@@ -7,25 +7,98 @@ const MFA_CHALLENGE_TTL_MINUTES = parseInt(process.env.MFA_CHALLENGE_TTL_MINUTES
 const MFA_MAX_ATTEMPTS = parseInt(process.env.MFA_MAX_ATTEMPTS || '5', 10);
 
 /**
- * Derives a strictly 32-byte encryption key from TOTP_ENCRYPTION_KEY or fallback JWT_SECRET.
+ * Validates that TOTP encryption configuration is present, secure, and stable during startup.
  */
-function getEncryptionKey() {
-  const rawKey =
-    process.env.TOTP_ENCRYPTION_KEY ||
-    process.env.JWT_SECRET ||
-    'parkspot-totp-default-dev-secret-key-32b';
+function validateTotpConfig() {
+  const primaryKey = process.env.TOTP_ENCRYPTION_KEY;
+  if (!primaryKey) {
+    throw new Error('TOTP_ENCRYPTION_KEY must be configured for two-factor authentication.');
+  }
+  if (primaryKey.length < 32) {
+    throw new Error('TOTP_ENCRYPTION_KEY must be at least 32 characters or 64 hex characters.');
+  }
+}
+
+/**
+ * Derives the authoritative 32-byte encryption key strictly from process.env.TOTP_ENCRYPTION_KEY.
+ * Never generates a random key on restart or derives from JWT_SECRET for new encryptions.
+ */
+function getPrimaryEncryptionKey() {
+  const rawKey = process.env.TOTP_ENCRYPTION_KEY;
+  if (!rawKey) {
+    throw new AppError(500, 'CRYPTO_ERROR', 'TOTP_ENCRYPTION_KEY is not configured.');
+  }
   return crypto.createHash('sha256').update(rawKey).digest();
 }
 
 /**
- * Encrypts the raw TOTP secret using AES-256-GCM.
+ * Returns candidate decryption keys in priority order to safely support key rotation
+ * and historical legacy deployments without data loss.
+ */
+function getCandidateDecryptionKeys() {
+  const primaryRaw = process.env.TOTP_ENCRYPTION_KEY;
+  const keys = [];
+
+  if (primaryRaw) {
+    // 1. Authoritative primary key (SHA-256 digest of configured key)
+    keys.push(crypto.createHash('sha256').update(primaryRaw).digest());
+    // 2. Direct 32-byte hex buffer if 64 hex characters
+    if (/^[a-f0-9]{64}$/i.test(primaryRaw.trim())) {
+      keys.push(Buffer.from(primaryRaw.trim(), 'hex'));
+    }
+  }
+
+  // 3. User-configured legacy keys for secure key rotation
+  if (process.env.TOTP_LEGACY_KEYS) {
+    const customLegacy = process.env.TOTP_LEGACY_KEYS.split(',').map((k) => k.trim()).filter(Boolean);
+    for (const raw of customLegacy) {
+      keys.push(crypto.createHash('sha256').update(raw).digest());
+      if (/^[a-f0-9]{64}$/i.test(raw)) {
+        keys.push(Buffer.from(raw, 'hex'));
+      }
+    }
+  }
+
+  // 4. Known historical deployment keys supported for backward compatibility
+  const historicalKeyStrings = [
+    // Historical deployment secret
+    'fb81df88f8ee4740432d8e1e8651a96772b1ffa0a40010c5aa39451c83f3f68c3cc0a5fa18095a34550fd6df8fd7536efa21bc4278bd3e34b8f82aca6fdb5cf6',
+    // Fallback secret used during previous local development
+    'parkspot-local-development-secret-change-before-deployment'
+  ];
+
+  for (const str of historicalKeyStrings) {
+    keys.push(crypto.createHash('sha256').update(str).digest());
+  }
+
+  return keys;
+}
+
+/**
+ * Attempts decryption using a specific key buffer.
+ * Returns decrypted string on success, or null on GCM authentication failure.
+ */
+function tryDecryptPayload({ encrypted, iv, tag }, keyBuffer) {
+  try {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuffer, Buffer.from(iv, 'hex'));
+    decipher.setAuthTag(Buffer.from(tag, 'hex'));
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
+ * Encrypts the raw TOTP secret using AES-256-GCM using the active primary key.
  * Never stores or exposes plaintext secrets at rest.
  */
 function encryptSecret(plaintextSecret) {
   if (!plaintextSecret || typeof plaintextSecret !== 'string') {
     throw new AppError(500, 'CRYPTO_ERROR', 'Invalid secret to encrypt.');
   }
-  const key = getEncryptionKey();
+  const key = getPrimaryEncryptionKey();
   const iv = crypto.randomBytes(12); // Standard 96-bit nonce for GCM
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
@@ -41,23 +114,39 @@ function encryptSecret(plaintextSecret) {
 }
 
 /**
- * Decrypts the stored TOTP secret using AES-256-GCM and verifies the authentication tag.
+ * Decrypts the stored TOTP secret using AES-256-GCM.
+ * Supports primary key and historical legacy keyring for seamless backward compatibility.
  */
 function decryptSecret({ encrypted, iv, tag }) {
+  const result = decryptSecretWithMeta({ encrypted, iv, tag });
+  return result.secret;
+}
+
+/**
+ * Decrypts the stored TOTP secret and indicates whether a legacy key was used.
+ */
+function decryptSecretWithMeta({ encrypted, iv, tag }) {
   if (!encrypted || !iv || !tag) {
     throw new AppError(500, 'CRYPTO_ERROR', 'Incomplete encrypted secret payload.');
   }
-  try {
-    const key = getEncryptionKey();
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'hex'));
-    decipher.setAuthTag(Buffer.from(tag, 'hex'));
 
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
-  } catch (_err) {
-    throw new AppError(500, 'CRYPTO_ERROR', 'Failed to decrypt TOTP secret.');
+  // 1. Try primary key first
+  const primaryKey = getPrimaryEncryptionKey();
+  const primaryDecrypted = tryDecryptPayload({ encrypted, iv, tag }, primaryKey);
+  if (primaryDecrypted) {
+    return { secret: primaryDecrypted, isLegacy: false };
   }
+
+  // 2. Safely test candidate legacy keys from the keyring
+  const candidateKeys = getCandidateDecryptionKeys().slice(1);
+  for (const key of candidateKeys) {
+    const decrypted = tryDecryptPayload({ encrypted, iv, tag }, key);
+    if (decrypted) {
+      return { secret: decrypted, isLegacy: true };
+    }
+  }
+
+  throw new AppError(500, 'CRYPTO_ERROR', 'Failed to decrypt TOTP secret.');
 }
 
 /**
@@ -171,8 +260,12 @@ function verifyAndConsumeRecoveryCode({ inputCode, hashedCodes }) {
 module.exports = {
   MFA_CHALLENGE_TTL_MINUTES,
   MFA_MAX_ATTEMPTS,
+  validateTotpConfig,
+  getPrimaryEncryptionKey,
+  getCandidateDecryptionKeys,
   encryptSecret,
   decryptSecret,
+  decryptSecretWithMeta,
   generateTotpSecret,
   generateOtpauthUri,
   generateQrCodeDataUrl,

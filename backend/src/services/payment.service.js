@@ -1,9 +1,10 @@
 const crypto = require('crypto');
 const https = require('https');
-const { Payment, Booking } = require('../models');
+const { Payment, Booking, ParkingLot, ParkingSlot, PricingRule } = require('../models');
 const { AppError } = require('../errors');
 const { logAction } = require('./audit.service');
 const { recordEvent } = require('./occupancy.service');
+const { rupeesToPaise, calculatePrice } = require('../utils/booking');
 
 function isMockEnabled() {
   const hasKey = Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
@@ -77,21 +78,73 @@ async function createPaymentOrder({ bookingId, userId, organizationId = null, ip
     status: { $in: ['CREATED', 'PENDING'] }
   });
   if (existingActive) {
+    const existingPaise = rupeesToPaise(existingActive.amount);
     return {
       payment: existingActive,
       order: {
         id: existingActive.providerOrderId,
         amount: existingActive.amount,
-        amountPaise: Math.round(existingActive.amount * 100),
-        currency: existingActive.currency,
+        amountPaise: existingPaise,
+        currency: existingActive.currency || 'INR',
         keyId: isMockEnabled() ? 'rzp_test_mock_key' : process.env.RAZORPAY_KEY_ID
       }
     };
   }
 
-  const amountPaise = Math.round(booking.totalAmount * 100);
+  // Authoritatively validate or calculate payable amount in rupees
+  const lot = await ParkingLot.findById(booking.lotId).lean();
+  if (!lot) {
+    throw new AppError(404, 'FACILITY_NOT_FOUND', 'The facility for this booking does not exist.');
+  }
+
+  const slot = await ParkingSlot.findById(booking.slotId).lean();
+  if (!slot) {
+    throw new AppError(404, 'SPOT_NOT_FOUND', 'The parking spot for this booking does not exist.');
+  }
+
+  if (String(slot.lotId) !== String(lot._id)) {
+    throw new AppError(400, 'INVALID_SPOT_FACILITY_RELATION', 'Selected spot does not belong to the selected facility.');
+  }
+
+  let payableRupees = Number(booking.totalAmount);
+  let pricingSource = 'PERSISTED_BOOKING';
+
+  if (!Number.isFinite(payableRupees) || payableRupees <= 0) {
+    pricingSource = 'FACILITY_PRICING_RULES';
+    const rules = await PricingRule.find({ facilityId: lot._id, isActive: true }).lean();
+    const calculated = calculatePrice({
+      start: booking.startTime,
+      end: booking.endTime,
+      type: booking.type,
+      hourlyRate: lot.hourlyRate > 0 ? lot.hourlyRate : 50,
+      dailyRate: lot.dailyRate > 0 ? lot.dailyRate : 300,
+      spotType: slot.type || 'STANDARD',
+      rules
+    });
+    if (calculated?.amount > 0) {
+      payableRupees = calculated.amount;
+      booking.totalAmount = payableRupees;
+      await booking.save();
+    } else {
+      throw new AppError(400, 'INVALID_PAYMENT_AMOUNT', 'Payable amount must be a valid positive number.');
+    }
+  }
+
+  // Convert rupees to integer paise exactly once with minimum amount validation
+  const amountPaise = rupeesToPaise(payableRupees);
   const receipt = `bkg_${String(booking._id).slice(-10)}`;
   const useMock = isMockEnabled();
+
+  console.info('[PaymentService] Initiating order creation:', {
+    bookingId: String(booking._id),
+    facilityId: String(booking.lotId),
+    pricingSource,
+    validatedRupeeAmount: payableRupees,
+    paiseAmount: amountPaise,
+    currency: 'INR',
+    stage: 'ORDER_CREATING',
+    useMock
+  });
 
   let razorpayOrder;
   if (useMock) {
@@ -103,13 +156,23 @@ async function createPaymentOrder({ bookingId, userId, organizationId = null, ip
       status: 'created'
     };
   } else {
-    razorpayOrder = await callRazorpayOrdersApi({
-      keyId: process.env.RAZORPAY_KEY_ID,
-      keySecret: process.env.RAZORPAY_KEY_SECRET,
-      amount: amountPaise,
-      currency: 'INR',
-      receipt
-    });
+    try {
+      razorpayOrder = await callRazorpayOrdersApi({
+        keyId: process.env.RAZORPAY_KEY_ID,
+        keySecret: process.env.RAZORPAY_KEY_SECRET,
+        amount: amountPaise,
+        currency: 'INR',
+        receipt
+      });
+    } catch (orderErr) {
+      console.error('[PaymentService] Razorpay order API error:', {
+        bookingId: String(booking._id),
+        amountPaise,
+        error: orderErr.message,
+        stage: 'ORDER_CREATION_FAILED'
+      });
+      throw orderErr;
+    }
   }
 
   const payment = await Payment.create({
@@ -118,7 +181,7 @@ async function createPaymentOrder({ bookingId, userId, organizationId = null, ip
     bookingId: booking._id,
     provider: useMock ? 'MOCK' : 'RAZORPAY',
     providerOrderId: razorpayOrder.id,
-    amount: booking.totalAmount,
+    amount: payableRupees,
     currency: 'INR',
     status: 'CREATED',
     metadata: {
@@ -137,9 +200,18 @@ async function createPaymentOrder({ bookingId, userId, organizationId = null, ip
     newValue: {
       providerOrderId: payment.providerOrderId,
       amount: payment.amount,
+      amountPaise,
       bookingId: payment.bookingId
     },
     ipAddress
+  });
+
+  console.info('[PaymentService] Payment order successfully registered:', {
+    bookingId: String(booking._id),
+    paymentId: String(payment._id),
+    providerOrderId: payment.providerOrderId,
+    amountPaise,
+    stage: 'ORDER_CREATED'
   });
 
   return {
@@ -178,6 +250,12 @@ async function verifyPayment({
   organizationId = null,
   ipAddress = null
 }) {
+  console.info('[PaymentService] Verifying payment:', {
+    providerOrderId: orderId,
+    providerPaymentId: paymentId,
+    stage: 'SIGNATURE_VERIFYING'
+  });
+
   const payment = await Payment.findOne({ providerOrderId: orderId });
   if (!payment) {
     throw new AppError(404, 'PAYMENT_NOT_FOUND', 'Payment order not found.');
@@ -194,6 +272,11 @@ async function verifyPayment({
   // Idempotency: duplicate verification when already PAID
   if (payment.status === 'PAID') {
     const booking = await Booking.findById(payment.bookingId);
+    console.info('[PaymentService] Duplicate verification handled idempotently:', {
+      paymentId: String(payment._id),
+      providerOrderId: orderId,
+      providerPaymentId: paymentId
+    });
     return {
       success: true,
       idempotent: true,
@@ -225,6 +308,13 @@ async function verifyPayment({
       entityId: payment._id,
       newValue: { status: 'FAILED', reason: 'INVALID_SIGNATURE' },
       ipAddress
+    });
+
+    console.warn('[PaymentService] Payment signature verification failed:', {
+      paymentId: String(payment._id),
+      providerOrderId: orderId,
+      providerPaymentId: paymentId,
+      stage: 'PAYMENT_FAILED'
     });
 
     throw new AppError(400, 'INVALID_PAYMENT_SIGNATURE', 'Payment signature verification failed.');
@@ -262,6 +352,14 @@ async function verifyPayment({
     entityId: payment._id,
     newValue: { status: 'PAID', providerPaymentId: paymentId },
     ipAddress
+  });
+
+  console.info('[PaymentService] Payment successfully verified and booking confirmed:', {
+    paymentId: String(payment._id),
+    bookingId: booking ? String(booking._id) : null,
+    providerOrderId: orderId,
+    providerPaymentId: paymentId,
+    stage: 'PAYMENT_VERIFIED'
   });
 
   return {

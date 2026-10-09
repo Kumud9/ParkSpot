@@ -23,6 +23,9 @@ if (!process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured.');
 }
 
+const { validateTotpConfig } = require('./services/totp.service');
+validateTotpConfig();
+
 const app = express();
 
 app.use(helmet());

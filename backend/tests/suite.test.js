@@ -31,5 +31,4 @@ require('./driver_experience_features.test');
 require('./signup_verification.test');
 require('./totp_mfa.test');
 require('./operator_onboarding.test');
-
-
+require('./payment_flow.test');

@@ -457,7 +457,7 @@ async function verifyMfaLogin({ email, mfaToken, token, code, otp }) {
     throw new AppError(400, 'MFA_NOT_CONFIGURED', 'Two-factor authentication is not configured for this account.');
   }
 
-  const decryptedSecret = totpService.decryptSecret({
+  const { secret: decryptedSecret, isLegacy } = totpService.decryptSecretWithMeta({
     encrypted: user.totpSecretEncrypted,
     iv: user.totpSecretIv,
     tag: user.totpSecretAuthTag
@@ -472,6 +472,14 @@ async function verifyMfaLogin({ email, mfaToken, token, code, otp }) {
       throw new AppError(429, 'MFA_ATTEMPTS_EXCEEDED', 'Too many verification attempts. Please start a new verification session.');
     }
     throw new AppError(400, 'INVALID_OTP', `Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`);
+  }
+
+  // If a verified legacy encryption format was used, seamlessly upgrade to current primary key
+  if (isLegacy) {
+    const reEncrypted = totpService.encryptSecret(decryptedSecret);
+    user.totpSecretEncrypted = reEncrypted.encrypted;
+    user.totpSecretIv = reEncrypted.iv;
+    user.totpSecretAuthTag = reEncrypted.tag;
   }
 
   user.mfaAttempts = 0;

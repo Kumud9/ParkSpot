@@ -70,7 +70,7 @@ async function enforceOperatorFacility(req, _res, next) {
   if (!req.user) {
     return next(new AppError(401, 'AUTH_REQUIRED', 'Authentication is required.'));
   }
-  const isOperatorAccount = req.user.accountType === 'OPERATOR' || ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(req.user.internalRole) || ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'].includes(req.user.role);
+  const isOperatorAccount = req.user.accountType === 'OPERATOR' || req.user.role === 'OPERATOR' || req.user.internalRole === 'OPERATOR';
   if (!isOperatorAccount) {
     return next();
   }

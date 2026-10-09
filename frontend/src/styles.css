@@ -867,7 +867,9 @@ header.app-header {
 /* -------------------------------------------------------------------------- */
 .operator-layout-container {
   display: flex;
-  min-height: calc(100vh - 64px);
+  flex: 1;
+  min-height: 100vh;
+  min-height: 100dvh;
   background-color: var(--ps-primary-light);
 }
 
@@ -879,11 +881,13 @@ header.app-header {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  padding: 1.5rem 0.75rem;
+  padding: 1.25rem 0.75rem 1.5rem;
   position: sticky;
-  top: 64px;
-  height: calc(100vh - 64px);
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .operator-sidebar-group {
@@ -1254,9 +1258,14 @@ header.app-header {
 @media (max-width: 900px) {
   .operator-layout-container {
     flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
   .operator-sidebar {
     width: 100%;
+    position: static;
+    top: auto;
+    height: auto;
     border-right: none;
     border-bottom: 1px solid var(--ps-secondary-light);
   }
@@ -3819,5 +3828,31 @@ header.app-header {
   justify-content: center;
   flex-shrink: 0;
 }
+
+/* Capacity Pressure Semantics */
+.status-tag.risk {
+  background-color: rgba(198, 40, 40, 0.12);
+  color: var(--ps-state-occupied);
+  border: 1px solid rgba(198, 40, 40, 0.35);
+}
+
+.status-tag.near-capacity {
+  background-color: rgba(217, 119, 6, 0.12);
+  color: var(--ps-state-reserved);
+  border: 1px solid rgba(217, 119, 6, 0.35);
+}
+
+.status-tag.busy {
+  background-color: rgba(178, 162, 64, 0.18);
+  color: #7D701E;
+  border: 1px solid rgba(178, 162, 64, 0.4);
+}
+
+.status-tag.normal {
+  background-color: rgba(46, 125, 50, 0.12);
+  color: var(--ps-state-available);
+  border: 1px solid rgba(46, 125, 50, 0.35);
+}
+
 
 

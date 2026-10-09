@@ -46,7 +46,7 @@ import { ParkingCountdown } from './driver/ParkingCountdown';
 import { FindMyCarModal } from './driver/FindMyCarModal';
 import { VehicleManagement } from './driver/VehicleManagement';
 
-function loadRazorpayScript() {
+function loadRazorpayScript(timeoutMs = 8000) {
   return new Promise((resolve) => {
     if (typeof window !== 'undefined' && window.Razorpay) {
       resolve(true);
@@ -54,15 +54,43 @@ function loadRazorpayScript() {
     }
     const existing = document.querySelector('script[src*="checkout.razorpay.com"]');
     if (existing) {
-      existing.addEventListener('load', () => resolve(true));
-      existing.addEventListener('error', () => resolve(false));
+      if (typeof window !== 'undefined' && window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      let elapsed = 0;
+      const interval = setInterval(() => {
+        elapsed += 100;
+        if (typeof window !== 'undefined' && window.Razorpay) {
+          clearInterval(interval);
+          resolve(true);
+        } else if (elapsed >= 3000) {
+          clearInterval(interval);
+          resolve(Boolean(typeof window !== 'undefined' && window.Razorpay));
+        }
+      }, 100);
       return;
     }
     const script = document.createElement('script');
     script.src = 'https://checkout.razorpay.com/v1/checkout.js';
     script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      resolve(false);
+    }, timeoutMs);
+    script.onload = () => {
+      if (!timedOut) {
+        clearTimeout(timer);
+        resolve(Boolean(typeof window !== 'undefined' && window.Razorpay));
+      }
+    };
+    script.onerror = () => {
+      if (!timedOut) {
+        clearTimeout(timer);
+        resolve(false);
+      }
+    };
     document.body.appendChild(script);
   });
 }
@@ -536,7 +564,7 @@ export function DriverExperience({
     }
     setUpiError('');
 
-    setPaymentState('PROCESSING');
+    setPaymentState('CREATING_ORDER');
     setPaymentError(null);
 
     const startIso = new Date(`${bookingDate}T${bookingStartTime}:00`).toISOString();
@@ -562,14 +590,14 @@ export function DriverExperience({
 
         const backendBookingId = bookingDoc._id || bookingDoc.id;
 
-        // Step B: Create payment order
+        // Step B: Create payment order with authoritative amount
         const orderRes = await api.createPaymentOrder(backendBookingId);
         const order = orderRes?.order;
         const isRealRazorpay = Boolean(order?.keyId && !order.keyId.includes('mock'));
 
         if (isRealRazorpay) {
-          await loadRazorpayScript();
-          if (typeof window === 'undefined' || !window.Razorpay) {
+          const scriptLoaded = await loadRazorpayScript();
+          if (!scriptLoaded || typeof window === 'undefined' || !window.Razorpay) {
             setPaymentState('FAILED');
             setPaymentError('Razorpay payment gateway failed to initialize. Please check your internet connection.');
             return;
@@ -602,11 +630,11 @@ export function DriverExperience({
             modal: {
               ondismiss: () => {
                 setPaymentState('FAILED');
-                setPaymentError('Payment was cancelled. Your parking spot has not been confirmed. You can try again or select another payment method.');
+                setPaymentError('Payment was cancelled or closed. Your parking spot has not been confirmed. You can try again or select another payment method.');
               }
             },
             handler: async (response) => {
-              // Razorpay returned payment info - must verify on backend!
+              // Razorpay returned payment info - verify signature with backend
               setPaymentState('PROCESSING');
               try {
                 const verifyPayload = {
@@ -615,7 +643,7 @@ export function DriverExperience({
                   signature: simulateFailure ? 'invalid_tampered_signature' : response.razorpay_signature
                 };
 
-                const verifyRes = await api.verifyPayment(verifyPayload);
+                const verifyRes = await api.verifyPayment(verifyPayload, 25000);
 
                 if (verifyRes?.success) {
                   const newBooking = {
@@ -653,11 +681,15 @@ export function DriverExperience({
                   refreshFacilitySpots();
                 } else {
                   setPaymentState('FAILED');
-                  setPaymentError('Payment verification could not be completed.');
+                  setPaymentError(verifyRes?.message || 'Payment verification could not be completed.');
                 }
               } catch (verifyErr) {
                 setPaymentState('FAILED');
-                setPaymentError(verifyErr.message || 'Payment signature verification failed. Spot reservation was not confirmed.');
+                if (verifyErr?.code === 'REQUEST_TIMEOUT' || verifyErr?.message?.toLowerCase().includes('timed out')) {
+                  setPaymentError('Payment verification timed out. If money was debited from your account, please check your bookings or contact support before attempting again.');
+                } else {
+                  setPaymentError(verifyErr.message || 'Payment signature verification failed. Spot reservation was not confirmed.');
+                }
               }
             }
           };
@@ -667,12 +699,15 @@ export function DriverExperience({
             setPaymentState('FAILED');
             setPaymentError(errResp.error?.description || 'Payment was declined by payment gateway or bank.');
           });
+          // Transition state so the background does not show the verification spinner while checkout modal is active
+          setPaymentState('IDLE');
           rzp.open();
           return;
         }
 
         // Mock fallback mode (only used when MOCK_PAYMENT is enabled or test mode)
         const orderId = order?.id || `ord_${Date.now()}`;
+        setPaymentState('PROCESSING');
         if (simulateFailure) {
           // Intentional failure trigger
           try {
@@ -680,7 +715,7 @@ export function DriverExperience({
               orderId,
               paymentId: `pay_err_${Date.now()}`,
               signature: 'invalid_mock_signature'
-            });
+            }, 25000);
           } catch (verifyErr) {
             setPaymentState('FAILED');
             setPaymentError(verifyErr.message || 'Payment signature verification failed.');
@@ -692,7 +727,7 @@ export function DriverExperience({
             orderId,
             paymentId: `pay_live_${Date.now()}`,
             signature: 'mock_valid_signature'
-          });
+          }, 25000);
         }
 
         // Backend confirmed payment and booking
@@ -756,6 +791,9 @@ export function DriverExperience({
         ) {
           setPaymentState('FAILED');
           setPaymentError('Your session has expired. Please sign in again to continue your reservation.');
+        } else if (err.code === 'REQUEST_TIMEOUT' || err.message?.toLowerCase().includes('timed out')) {
+          setPaymentState('FAILED');
+          setPaymentError('Payment request timed out while communicating with the server. Please check your connection and try again.');
         } else {
           setPaymentState('FAILED');
           setPaymentError(err.message || 'Payment session could not be completed.');
