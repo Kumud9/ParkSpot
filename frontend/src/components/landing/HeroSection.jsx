@@ -1,7 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Clock, ShieldCheck, BarChart3 } from 'lucide-react';
 import { LandingNavbar } from './LandingNavbar';
+import heroBg from '../../assets/parkspot-hero.png';
 
 export function HeroSection({ onOpenAuth }) {
   const navigate = useNavigate();
@@ -14,18 +15,18 @@ export function HeroSection({ onOpenAuth }) {
 
   return (
     <section className="editorial-hero" id="hero">
-      {/* Background Image: Full-bleed cover */}
+      {/* Background Image: Full-bleed photograph */}
       <img
-        src="/assets/parkspot-hero.jpg"
+        src={heroBg}
         alt="ParkSpot modern managed parking facility"
         className="editorial-hero-bg-img"
         loading="eager"
         onError={(e) => {
-          e.currentTarget.src = '/assets/parking-residential.webp';
+          e.currentTarget.src = '/assets/parkspot-hero.png';
         }}
       />
 
-      {/* Dark Left-Side Gradient Overlay */}
+      {/* Dark Left-Side Gradient Overlay ensuring high legibility */}
       <div className="editorial-hero-overlay" />
 
       {/* Navbar positioned over hero */}
@@ -33,10 +34,10 @@ export function HeroSection({ onOpenAuth }) {
         <LandingNavbar onOpenAuth={onOpenAuth} />
       </div>
 
-      {/* Hero Content: Left-aligned, high contrast, editorial layout */}
+      {/* Hero Content: Left-aligned, high contrast editorial layout */}
       <div className="editorial-hero-content-wrap">
         <div className="editorial-hero-content">
-          {/* Eyebrow: PREMIUM MANAGED PARKING ─── */}
+          {/* Eyebrow: PREMIUM MANAGED PARKING ─ */}
           <div className="editorial-hero-eyebrow">
             <span className="editorial-hero-tag">PREMIUM MANAGED PARKING</span>
             <span className="editorial-hero-eyebrow-line" aria-hidden="true" />
@@ -51,8 +52,7 @@ export function HeroSection({ onOpenAuth }) {
 
           {/* Supporting Text */}
           <p className="editorial-hero-subhead">
-            Find a parking facility, choose your space,<br className="hero-subhead-break" />
-            and reserve it before you arrive.
+            Find and reserve the right parking space before you arrive.
           </p>
 
           {/* CTA Buttons */}
@@ -72,6 +72,43 @@ export function HeroSection({ onOpenAuth }) {
             >
               For Businesses
             </button>
+          </div>
+
+          {/* Trust and Benefit Indicators */}
+          <div className="editorial-hero-trust-strip">
+            <div className="editorial-trust-item">
+              <div className="editorial-trust-icon-box">
+                <Clock size={18} />
+              </div>
+              <div className="editorial-trust-text">
+                <strong className="editorial-trust-title">Save Time</strong>
+                <span className="editorial-trust-desc">No more circling</span>
+              </div>
+            </div>
+
+            <div className="editorial-trust-divider" aria-hidden="true" />
+
+            <div className="editorial-trust-item">
+              <div className="editorial-trust-icon-box">
+                <ShieldCheck size={18} />
+              </div>
+              <div className="editorial-trust-text">
+                <strong className="editorial-trust-title">Trusted Spaces</strong>
+                <span className="editorial-trust-desc">Secure & verified</span>
+              </div>
+            </div>
+
+            <div className="editorial-trust-divider" aria-hidden="true" />
+
+            <div className="editorial-trust-item">
+              <div className="editorial-trust-icon-box">
+                <BarChart3 size={18} />
+              </div>
+              <div className="editorial-trust-text">
+                <strong className="editorial-trust-title">Smarter Parking</strong>
+                <span className="editorial-trust-desc">Powered by real-time data</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

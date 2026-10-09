@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Logo } from '../shared/Logo';
 import { Menu, X, ArrowRight } from 'lucide-react';
+import parkspotMark from '../../assets/parkspot-mark.png';
 
 export function LandingNavbar({ onOpenAuth }) {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export function LandingNavbar({ onOpenAuth }) {
   return (
     <header className={`landing-nav-wrapper ${isScrolled ? 'scrolled' : ''}`}>
       <nav className="landing-nav-container">
-        {/* Left: ParkSpot Brand (New Uploaded Logo Asset + Wordmark) */}
+        {/* Left: ParkSpot Brand (Logo Mark + Wordmark) */}
         <div
           className="landing-nav-brand"
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
@@ -36,12 +36,15 @@ export function LandingNavbar({ onOpenAuth }) {
           aria-label="ParkSpot Home"
         >
           <img
-            src="/assets/parkspot-uploaded-logo.png"
+            src={parkspotMark}
             alt="ParkSpot"
             className="landing-brand-logo-img"
+            onError={(e) => {
+              e.currentTarget.src = '/assets/parkspot-uploaded-logo.png';
+            }}
           />
           <span className="landing-brand-wordmark">
-            ParkSpot
+            <span className="brand-accent-text">Park</span>Spot
           </span>
         </div>
 
